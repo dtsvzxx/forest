@@ -10,7 +10,7 @@ The window has two modes, switched from the top-left.
 | Pane | What it does |
 | --- | --- |
 | **Projects** | Repositories you have opened, plus Open / New / Clone. Right-click for Show in Finder / Copy path |
-| **Worktrees** | Every working tree, newest activity first — branch, age, dirty count, ahead/behind, lock state. Create, remove, lock, prune; right-click to start or jump to an agent. |
+| **Worktrees** | Every working tree, newest activity first — branch, age, dirty count, ahead/behind, lock state. Create, rename, remove, lock, prune; right-click to start or jump to an agent. |
 | **Changes** | The selected worktree's diff, as `Changes`, `Conflicts`, `Log`, `Search` and `Console` tabs |
 | **Terminal** | A real shell in the selected worktree, one tab per worktree |
 
@@ -66,6 +66,11 @@ already running in it.
 A pane runs the agent you picked, and **picks up where you left off**: if that tool has run in the
 worktree before, the pane opens on its most recent session there rather than an empty one. The agent
 runs inside a login shell and the shell stays when the agent exits, so nothing is lost if it stops.
+
+**Rename…** on a worktree renames its folder, its branch, or both — they are normally named after
+each other, and renaming one alone is the reliable way to make them disagree. Uncommitted work moves
+with the folder and any agent running in it keeps running. The main working tree cannot be moved by
+git, so only its branch is offered.
 
 Right-click a project and choose **Agents…** to say which ones it offers. Claude Code and Codex are
 offered wherever they are installed; you can switch either off, and add commands of your own — those

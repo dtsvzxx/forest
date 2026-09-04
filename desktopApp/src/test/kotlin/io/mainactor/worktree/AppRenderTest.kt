@@ -134,6 +134,28 @@ class AppRenderTest {
     }
 
     @Test
+    fun `renders the rename dialog`() {
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            WorktreeTheme {
+                Box(Modifier.fillMaxSize().background(LocalWorktreeColors.current.editor)) {
+                    io.mainactor.worktree.ui.dialogs.RenameWorktreeDialog(
+                        worktree = Worktree(
+                            path = "/repo-NOTASK-partial-payments-rollout",
+                            branch = "NOTASK-partial-payments-rollout",
+                        ),
+                        onDismiss = {},
+                        onConfirm = { _, _ -> },
+                    )
+                }
+            }
+        }
+        val image = try { scene.render(); scene.render() } finally { scene.close() }
+        val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes
+        assertTrue(png != null && png.isNotEmpty())
+        File("build/reports/app-render-rename.png").apply { parentFile?.mkdirs() }.writeBytes(png)
+    }
+
+    @Test
     fun `renders the project's agent settings`() {
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             WorktreeTheme {

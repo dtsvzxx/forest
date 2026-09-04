@@ -39,6 +39,7 @@ import io.mainactor.worktree.ui.dialogs.CommitDialog
 import io.mainactor.worktree.ui.dialogs.MergeDialog
 import io.mainactor.worktree.ui.dialogs.AgentSettingsDialog
 import io.mainactor.worktree.ui.dialogs.NewAgentDialog
+import io.mainactor.worktree.ui.dialogs.RenameWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.RebaseDialog
 import io.mainactor.worktree.ui.dialogs.RemoveWorktreeDialog
@@ -63,6 +64,7 @@ private sealed interface Dialog {
     data object Clone : Dialog
     data class RemoveWorktree(val worktree: Worktree) : Dialog
     data class SwitchBranch(val worktree: Worktree) : Dialog
+    data class RenameWorktree(val worktree: Worktree) : Dialog
     data class NewAgent(val axis: SplitAxis?) : Dialog
     data object AgentSettings : Dialog
 }
@@ -164,6 +166,7 @@ fun App(
                         onCreate = { dialog = Dialog.NewWorktree },
                         onRemove = { dialog = Dialog.RemoveWorktree(it) },
                         onSwitchBranch = { dialog = Dialog.SwitchBranch(it) },
+                        onRename = { dialog = Dialog.RenameWorktree(it) },
                         modifier = Modifier.width(worktreesWidth * squeeze),
                     )
                     VerticalSplitter(
@@ -407,6 +410,15 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
             onConfirm = { agents ->
                 onDismiss()
                 state.saveProjectAgents(agents)
+            },
+        )
+
+        is Dialog.RenameWorktree -> RenameWorktreeDialog(
+            worktree = dialog.worktree,
+            onDismiss = onDismiss,
+            onConfirm = { folder, branch ->
+                onDismiss()
+                state.renameWorktree(dialog.worktree, folder, branch)
             },
         )
 

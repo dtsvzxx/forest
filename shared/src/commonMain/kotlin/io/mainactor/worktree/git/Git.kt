@@ -278,6 +278,30 @@ class Git(
     suspend fun unlockWorktree(dir: String, path: String): CommandResult =
         run(dir, "worktree", "unlock", path)
 
+    /**
+     * `git worktree move`. Relocates the checkout and repairs the administrative files that point
+     * at it, which a plain `mv` would leave dangling.
+     *
+     * Git refuses on the main working tree and on a locked one; it moves a *dirty* one happily,
+     * which is the right call — uncommitted work travels with the directory.
+     */
+    suspend fun moveWorktree(dir: String, from: String, to: String, force: Boolean = false): CommandResult {
+        val args = mutableListOf("worktree", "move")
+        if (force) args += "--force"
+        args += from
+        args += to
+        return run(dir, args)
+    }
+
+    /**
+     * `git branch -m`, run from the repository rather than from the worktree.
+     *
+     * A branch checked out in another working tree renames fine this way, and that tree's `HEAD`
+     * follows — verified against the real binary, since it is the case this app is mostly made of.
+     */
+    suspend fun renameBranch(dir: String, from: String, to: String): CommandResult =
+        run(dir, "branch", "-m", from, to)
+
     suspend fun pruneWorktrees(dir: String): CommandResult = run(dir, "worktree", "prune", "-v")
 
     // ---------------------------------------------------------------- diff

@@ -97,3 +97,15 @@ fun PaneNode.withFraction(splitId: String, fraction: Float): PaneNode = when (th
 
 /** Keeps a pane from being dragged down to nothing. */
 const val MIN_PANE_FRACTION = 0.08f
+
+/**
+ * Rebuilds the tree with every session passed through [transform], keeping its shape.
+ *
+ * Used when a worktree is renamed: the shells keep running — a moved directory is the same inode,
+ * so their own working directory follows — but the path each pane records for it does not, and that
+ * path is what finds its usage and takes you back to it in the project view.
+ */
+fun PaneNode.mapSessions(transform: (TerminalSession) -> TerminalSession): PaneNode = when (this) {
+    is PaneNode.Leaf -> PaneNode.Leaf(transform(session))
+    is PaneNode.Split -> copy(first = first.mapSessions(transform), second = second.mapSessions(transform))
+}

@@ -24,6 +24,7 @@ import io.mainactor.worktree.model.ProjectAgents
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.model.contains
 import io.mainactor.worktree.model.removeLeaf
+import io.mainactor.worktree.model.mapSessions
 import io.mainactor.worktree.model.sessions
 import io.mainactor.worktree.model.splitLeaf
 import io.mainactor.worktree.model.withFraction
@@ -837,6 +838,71 @@ class AppState(
         if (agentWorktree?.path == worktree.path) agentWorktree = null
         notice = Notice("Removed ${worktree.name}", isError = false)
         reloadProject(selectPath = null)
+    }
+
+    /**
+     * Renames a worktree: its folder, its branch, or both.
+     *
+     * The branch goes first. It is renamed from the repository rather than from the worktree, so it
+     * does not care where the checkout currently sits — and if it fails, nothing has moved yet.
+     *
+     * Uncommitted work is safe: `git worktree move` relocates a dirty tree happily, and a moved
+     * directory keeps its inode, so a shell already running inside it follows along. What does not
+     * follow is the path each agent pane *recorded*, which is how its usage is found and how "show
+     * in project" gets back — so those are rewritten here.
+     */
+    fun renameWorktree(worktree: Worktree, folderName: String?, branchName: String?) =
+        run("Renaming worktree") {
+            val root = project?.path ?: return@run
+            val newBranch = branchName?.trim()?.takeIf { it.isNotEmpty() && it != worktree.branch }
+            val newFolder = folderName?.trim()?.takeIf { it.isNotEmpty() && it != worktree.name }
+            if (newBranch == null && newFolder == null) return@run
+
+            val currentBranch = worktree.branch
+            if (newBranch != null && currentBranch != null) {
+                val renamed = git.renameBranch(root, currentBranch, newBranch)
+                if (!renamed.ok) {
+                    fail(renamed)
+                    return@run
+                }
+            }
+
+            var path = worktree.path
+            if (newFolder != null) {
+                val parent = fs.parentOf(worktree.path) ?: return@run
+                val target = fs.resolve(parent, newFolder)
+                // `git worktree move` onto a path that already exists moves the worktree *inside*
+                // it, the way `mv` does, and reports success. Checking first is the difference
+                // between a rename and a silently nested checkout.
+                if (fs.exists(target)) {
+                    notice = Notice("${'$'}newFolder already exists", isError = true)
+                    return@run
+                }
+                val moved = git.moveWorktree(root, worktree.path, target)
+                if (!moved.ok) {
+                    fail(moved)
+                    return@run
+                }
+                retarget(worktree.path, target)
+                path = target
+            }
+
+            notice = Notice("Renamed ${'$'}{worktree.name}", isError = false)
+            reloadProject(selectPath = path)
+        }
+
+    /** Points everything that remembered a worktree by path at where it now is. */
+    private fun retarget(from: String, to: String) {
+        fun moved(dir: String) = when {
+            dir == from -> to
+            dir.startsWith("${'$'}from/") -> to + dir.removePrefix(from)
+            else -> dir
+        }
+        agentLayout = agentLayout?.mapSessions { session ->
+            session.copy(workDir = moved(session.workDir))
+        }
+        terminals = terminals.map { it.copy(workDir = moved(it.workDir)) }
+        if (agentWorktree?.path == from) agentWorktree = agentWorktree?.copy(path = to)
     }
 
     fun pruneWorktrees() = run("Pruning worktrees") {

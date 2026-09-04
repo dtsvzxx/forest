@@ -225,6 +225,108 @@ class AppStateIntegrationTest {
         }
 
     @Test
+    fun `renaming a worktree moves its folder and renames its branch`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "old-folder").path,
+            newBranch = "old-branch",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        val worktree = state.worktrees.single { !it.isMain }
+
+        state.renameWorktree(worktree, folderName = "new-folder", branchName = "new-branch").join()
+
+        val renamed = state.worktrees.single { !it.isMain }
+        assertEquals("new-folder", renamed.name)
+        assertEquals("new-branch", renamed.branch)
+        assertTrue(File(root, "new-folder").isDirectory)
+        assertFalse(File(root, "old-folder").exists())
+        // The move has to be git's, not a bare `mv`: the administrative files must still point here.
+        assertTrue(File(root, "new-folder/.git").exists())
+    }
+
+    @Test
+    fun `uncommitted work survives the move`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "dirty").path,
+            newBranch = "dirty-branch",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        File(root, "dirty/file.txt").writeText("work in progress\n")
+
+        state.renameWorktree(state.worktrees.single { !it.isMain }, "moved", null).join()
+
+        assertEquals("work in progress\n", File(root, "moved/file.txt").readText())
+    }
+
+    @Test
+    fun `renaming onto an existing folder is refused rather than nested inside it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "wt").path,
+            newBranch = "wt-branch",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        File(root, "occupied").mkdirs()
+
+        state.renameWorktree(state.worktrees.single { !it.isMain }, "occupied", null).join()
+
+        // Left to itself `git worktree move` treats an existing directory the way `mv` does: it
+        // moves the worktree *inside* it and reports success, which is never what "rename" meant.
+        assertTrue(state.notice?.isError == true)
+        assertEquals("wt", state.worktrees.single { !it.isMain }.name)
+        assertFalse(File(root, "occupied/wt").exists())
+    }
+
+    @Test
+    fun `the main worktree keeps its folder and still renames its branch`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val main = state.worktrees.single { it.isMain }
+
+        state.renameWorktree(main, folderName = null, branchName = "trunk").join()
+
+        assertEquals("trunk", state.worktrees.single { it.isMain }.branch)
+        assertTrue(mainRepo.isDirectory, "git cannot move the main working tree, and we never ask")
+    }
+
+    @Test
+    fun `agents running in a renamed worktree follow it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "before").path,
+            newBranch = "before-branch",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        val worktree = state.worktrees.single { !it.isMain }
+        state.startAgentFor(worktree, state.availableAgents.single { it.id == "shell" })?.join()
+
+        state.renameWorktree(worktree, "after", null).join()
+
+        // The shell keeps running — a moved directory is the same inode — but the path the pane
+        // recorded is what finds its usage and takes you back to it.
+        assertEquals(File(root, "after").canonicalPath, state.agents.single().workDir)
+    }
+
+    @Test
     fun `a plain shell pane runs no command at all`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val state = newState()

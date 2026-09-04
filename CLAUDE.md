@@ -294,6 +294,21 @@ Four constraints worth remembering:
 Dependencies: JediTerm and pty4j come from the JetBrains repository declared in
 `settings.gradle.kts`, not Maven Central. **JediTerm is LGPL 3.0** and is linked unmodified.
 
+**Renaming a worktree** is `git worktree move` for the folder and `git branch -m` for the branch,
+offered together because the two are normally named after each other. Three things are worth
+knowing, and each is pinned by a test:
+
+- Given a destination that already exists, `git worktree move` moves the worktree *inside* it the
+  way `mv` does — and reports success. `AppState.renameWorktree` checks first, or a rename silently
+  becomes a nested checkout.
+- The branch is renamed **first**, from the repository rather than from the worktree, so a failure
+  leaves nothing moved. A branch checked out in another working tree renames fine that way and that
+  tree's `HEAD` follows.
+- Git moves a *dirty* worktree happily and the directory keeps its inode, so a shell running inside
+  it follows along. What does not follow is the path each agent pane recorded — `retarget` rewrites
+  those, since that path is how a pane's usage is found and how "show worktree in project" gets
+  back. Git refuses on the main working tree, so the dialog only offers its branch.
+
 ## Agents a pane can run
 
 A pane used to be a login shell and nothing else. It now runs whatever agent was chosen for it, and

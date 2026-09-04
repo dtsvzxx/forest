@@ -1128,3 +1128,95 @@ private fun AgentToggleRow(
         }
     }
 }
+
+/**
+ * Renames a worktree: the folder it lives in, the branch it has checked out, or both.
+ *
+ * Both, because they are usually named after each other — a folder called `repo-FM-3713` holding a
+ * branch called `FM-3713` — and renaming one alone is the reliable way to make them disagree.
+ * Either field can be left as it is.
+ */
+@Composable
+fun RenameWorktreeDialog(
+    worktree: Worktree,
+    onDismiss: () -> Unit,
+    onConfirm: (folderName: String?, branchName: String?) -> Unit,
+) {
+    val colors = LocalWorktreeColors.current
+    val currentBranch = worktree.branch.orEmpty()
+    var folder by remember { mutableStateOf(worktree.name) }
+    var branch by remember { mutableStateOf(currentBranch) }
+
+    // Git refuses to move the main working tree: it is the repository, not one of the checkouts
+    // around it.
+    val canMove = !worktree.isMain
+    val canRename = currentBranch.isNotEmpty()
+
+    val folderChanged = canMove && folder.trim() != worktree.name
+    val branchChanged = canRename && branch.trim() != currentBranch
+    val badFolder = folder.trim().let { it.isEmpty() || '/' in it || '\\' in it }
+    val badBranch = branch.trim().isEmpty()
+    val valid = (folderChanged || branchChanged) &&
+        (!folderChanged || !badFolder) &&
+        (!branchChanged || !badBranch)
+
+    Modal(
+        title = "Rename worktree",
+        onDismiss = onDismiss,
+        width = 460.dp,
+        footer = {
+            IdeButton("Cancel", onDismiss)
+            IdeButton(
+                text = "Rename",
+                onClick = {
+                    onConfirm(
+                        folder.trim().takeIf { folderChanged },
+                        branch.trim().takeIf { branchChanged },
+                    )
+                },
+                enabled = valid,
+                primary = valid,
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Field("Folder") {
+                IdeTextField(
+                    value = folder,
+                    onValueChange = { folder = it },
+                    enabled = canMove,
+                    placeholder = worktree.name,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Field("Branch") {
+                IdeTextField(
+                    value = branch,
+                    onValueChange = { branch = it },
+                    enabled = canRename,
+                    placeholder = if (canRename) currentBranch else "detached",
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            val hint = when {
+                !canMove -> "This is the main working tree — git cannot move it, so only its " +
+                    "branch can be renamed here."
+                !canRename -> "This worktree is detached, so there is no branch to rename."
+                worktree.isLocked -> "This worktree is locked; unlock it first or the move will be " +
+                    "refused."
+                badFolder && folder.trim().isNotEmpty() -> "A folder name, not a path."
+                else -> "Uncommitted work moves with the folder, and any agent running in it keeps " +
+                    "running."
+            }
+            Text(
+                text = hint,
+                color = if (badFolder && folder.trim().isNotEmpty()) colors.error else colors.textDisabled,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}

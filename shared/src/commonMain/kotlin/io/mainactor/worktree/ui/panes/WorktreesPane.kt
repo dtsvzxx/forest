@@ -57,6 +57,7 @@ fun WorktreesPane(
     onCreate: () -> Unit,
     onRemove: (Worktree) -> Unit,
     onSwitchBranch: (Worktree) -> Unit,
+    onRename: (Worktree) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorktreeColors.current
@@ -174,6 +175,7 @@ fun WorktreesPane(
                             worktree = worktree,
                             onRemove = { onRemove(worktree) },
                             onSwitchBranch = { onSwitchBranch(worktree) },
+                            onRename = { onRename(worktree) },
                             status = state.worktreeStatuses[worktree.path],
                             selected = selected?.path == worktree.path,
                             onClick = { state.selectWorktree(worktree) },
@@ -207,6 +209,7 @@ private fun WorktreeRow(
     onLockToggle: () -> Unit,
     onRemove: () -> Unit,
     onSwitchBranch: () -> Unit,
+    onRename: () -> Unit,
     endPadding: androidx.compose.ui.unit.Dp,
 ) {
     val colors = LocalWorktreeColors.current
@@ -242,6 +245,9 @@ private fun WorktreeRow(
                     }
                     add(ContextMenuItem("Switch branch…", onSwitchBranch))
                 }
+                // Offered on the main working tree too: git will not move it, but its branch
+                // renames like any other.
+                add(ContextMenuItem("Rename…", onRename))
                 add(ContextMenuItem("Open terminal here") { state.openTerminal(worktree) })
                 add(ContextMenuItem(state.system.revealLabel) { state.system.reveal(worktree.path) })
                 add(ContextMenuItem("Copy path") { state.system.copyToClipboard(worktree.path) })
