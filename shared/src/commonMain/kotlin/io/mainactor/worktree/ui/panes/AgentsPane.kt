@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import io.mainactor.worktree.TerminalSession
 import io.mainactor.worktree.model.MIN_PANE_FRACTION
 import io.mainactor.worktree.model.PaneNode
 import io.mainactor.worktree.model.SplitAxis
+import io.mainactor.worktree.usage.UsageFormat
 import io.mainactor.worktree.ui.AgentShortcuts
 import io.mainactor.worktree.ui.components.EmptyState
 import io.mainactor.worktree.ui.components.HorizontalDivider
@@ -49,8 +51,10 @@ import io.mainactor.worktree.ui.components.IdeButton
 import io.mainactor.worktree.ui.components.IdeIcon
 import io.mainactor.worktree.ui.components.ProportionalSplitter
 import io.mainactor.worktree.ui.components.ToolButton
+import io.mainactor.worktree.ui.components.Tooltip
 import io.mainactor.worktree.ui.theme.Dimens
 import io.mainactor.worktree.ui.theme.LocalWorktreeColors
+import kotlinx.coroutines.delay
 
 /**
  * The agent wall: many terminals for the same worktree, tiled like a multiplexer.
@@ -69,6 +73,15 @@ fun AgentsPane(
 ) {
     val colors = LocalWorktreeColors.current
     val zoomed = state.agents.firstOrNull { it.id == state.zoomedAgent }
+
+    // Usage is re-read only while the wall is on screen. There is no timer hiding in AppState:
+    // the numbers exist to be looked at, and nothing looks at them from the project view.
+    LaunchedEffect(Unit) {
+        while (true) {
+            state.refreshAgentUsage().join()
+            delay(USAGE_POLL_MS)
+        }
+    }
 
     Column(modifier.fillMaxSize().background(colors.editor)) {
         AgentsToolbar(state, onAddAgent)
@@ -276,6 +289,22 @@ private fun AgentPaneHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        state.agentUsage[session.workDir]?.takeIf { !it.isEmpty }?.let { usage ->
+            Tooltip(
+                text = "Claude usage in ${session.workDir.substringAfterLast('/')}",
+                detail = UsageFormat.detail(usage),
+            ) {
+                // Unweighted: the title above keeps the row's only weight, so a long branch name
+                // gives way to the figure rather than the two splitting the row between them.
+                Text(
+                    text = UsageFormat.badge(usage),
+                    color = colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
         ToolButton(
             icon = IconKind.GOTO,
             tooltip = "Show this agent's worktree in the project view",
@@ -389,3 +418,5 @@ private fun Divider() {
     )
 }
 
+/** How often the wall re-reads the usage transcripts while it is on screen. */
+private const val USAGE_POLL_MS = 4_000L

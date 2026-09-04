@@ -8,6 +8,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -95,6 +97,30 @@ class JvmFileSystemAccess(
         runCatching { File(path).canonicalPath }.getOrElse { File(path).absolutePath }
 
     override fun lastModifiedAt(path: String): Long = File(path).lastModified() / 1000
+
+    override fun listDirectory(path: String): List<String> =
+        File(path).list()?.toList().orEmpty()
+
+    override fun fileSize(path: String): Long = File(path).length()
+
+    override fun readFrom(path: String, offset: Long, maxBytes: Int): ByteArray {
+        val file = File(path)
+        val length = file.length()
+        if (offset >= length) return ByteArray(0)
+        val wanted = minOf(length - offset, maxBytes.toLong()).toInt()
+        return try {
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(offset)
+                val buffer = ByteArray(wanted)
+                raf.readFully(buffer)
+                buffer
+            }
+        } catch (e: IOException) {
+            // A transcript can be pruned or rotated out from under us at any moment; the reader
+            // treats an empty result as "nothing new", which is the right answer either way.
+            ByteArray(0)
+        }
+    }
 
     override fun now(): Long = System.currentTimeMillis() / 1000
 }

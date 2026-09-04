@@ -30,7 +30,10 @@ import io.mainactor.worktree.platform.CommandResult
 import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.platform.FileSystemAccess
 import io.mainactor.worktree.platform.SystemIntegration
+import io.mainactor.worktree.usage.UsageReader
+import io.mainactor.worktree.usage.WorktreeUsage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -40,6 +43,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 
 /** What the right-hand pane is comparing. */
 enum class DiffMode {
@@ -243,6 +247,21 @@ class AppState(
 
     var focusedAgent by mutableStateOf<String?>(null)
         private set
+
+    /**
+     * What Claude Code has spent in each worktree holding an agent pane, keyed by worktree path.
+     *
+     * Read from the transcripts Claude Code writes for itself, so it covers every session in the
+     * worktree — including ones started from an ordinary terminal rather than from a pane here.
+     */
+    var agentUsage by mutableStateOf<Map<String, WorktreeUsage>>(emptyMap())
+        private set
+
+    /** The in-flight read, exposed the same way [badgeRefresh] is so tests can join it. */
+    var usageRefresh: Job? = null
+        private set
+
+    private val usageReader = UsageReader(fs)
 
     /** When set, that one pane fills the wall — the multiplexer's zoom. */
     var zoomedAgent by mutableStateOf<String?>(null)
@@ -593,6 +612,28 @@ class AppState(
 
     fun selectCommitFile(file: FileDiff) {
         commitFile = file
+    }
+
+    /**
+     * Re-reads the usage transcripts for every worktree on the agent wall.
+     *
+     * Outside [gitLock] on purpose — no git is involved, and a click must never wait behind a file
+     * read — and off the main thread, because the first read of a session is the whole file and
+     * the largest on this machine is 59 MB. Overlapping calls collapse into the one already
+     * running: the reader holds a position per file and is not re-entrant.
+     */
+    fun refreshAgentUsage(): Job {
+        usageRefresh?.takeIf { it.isActive }?.let { return it }
+        val dirs = agents.map { it.workDir }.distinct()
+        val job = scope.launch {
+            agentUsage = if (dirs.isEmpty()) {
+                emptyMap()
+            } else {
+                withContext(Dispatchers.IO) { dirs.associateWith { usageReader.read(it) } }
+            }
+        }
+        usageRefresh = job
+        return job
     }
 
     private fun clearCommitSelection() {

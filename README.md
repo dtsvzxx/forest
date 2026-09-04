@@ -48,6 +48,12 @@ The bindings differ for a concrete reason: on Linux and Windows a bare `Ctrl` ch
 shell — `Ctrl+D` is end-of-input — so the wall uses `Ctrl+Shift`, the convention terminal emulators
 already follow there. They are only live in Agents mode.
 
+Each pane's header shows what Claude Code has spent in that pane's worktree — tokens and an
+estimated cost — read from the transcripts Claude Code writes for itself rather than from the
+terminal. It therefore counts every session in the worktree, including ones you started in an
+ordinary terminal, and hovering it breaks the figure down by input, output and cache. The cost is an
+estimate against a price table with a date on it; nothing on disk records what was actually charged.
+
 Each pane can send you the other way too: its first header button (and its context menu) opens that
 agent's worktree in the Project view, loading its repository first when the pane belongs to one that
 is not currently open.

@@ -458,6 +458,9 @@ class AppRenderTest {
             state.openAgent(worktree, SplitAxis.ROW)
             state.openAgent(worktree, SplitAxis.COLUMN)
             state.openAgent(worktree, SplitAxis.ROW)
+            // The wall polls usage on a timer of its own; drive one pass so the badge is painted
+            // rather than waiting on wall-clock time inside a render test.
+            kotlinx.coroutines.runBlocking { state.refreshAgentUsage().join() }
             scene.render()
             scene.render()
         } finally {
@@ -467,6 +470,15 @@ class AppRenderTest {
         val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes!!
         File("build/reports/app-render-agents.png").apply { parentFile?.mkdirs() }.writeBytes(png)
         assertEquals(4, state.agents.size)
+
+        // Four panes on one worktree share one transcript, and one response is one response no
+        // matter how many panes are looking at it.
+        val usage = state.agentUsage.getValue("/repo")
+        assertEquals(1, usage.requests)
+        assertEquals(2_480_200, usage.tokens.total)
+        // 1.2K in at $5/M, 48K out at $25/M, 2.4M cache reads at $0.50/M, 31K one-hour cache
+        // writes at $10/M — the one-hour rate being double the input rate is the part worth pinning.
+        assertEquals("2.5M · ${'$'}2.72", io.mainactor.worktree.usage.UsageFormat.badge(usage))
     }
 
     @Test
@@ -944,6 +956,21 @@ private class FakeFileSystem(private val conflicted: Boolean = false) : FileSyst
     override fun resolve(base: String, child: String) = "$base/$child"
     override fun canonicalPath(path: String) = path
 
+    // Enough of a ~/.claude/projects tree for the agent wall to show a usage badge: one project
+    // directory for /repo, holding one session with one response in it.
+    override fun listDirectory(path: String): List<String> = when {
+        path.endsWith(".claude/projects") -> listOf("-repo")
+        path.endsWith("/-repo") -> listOf("s.jsonl")
+        else -> emptyList()
+    }
+
+    override fun fileSize(path: String) = if (path.endsWith("s.jsonl")) TRANSCRIPT.size.toLong() else 0L
+
+    override fun readFrom(path: String, offset: Long, maxBytes: Int): ByteArray {
+        if (!path.endsWith("s.jsonl") || offset >= TRANSCRIPT.size) return ByteArray(0)
+        return TRANSCRIPT.copyOfRange(offset.toInt(), minOf(TRANSCRIPT.size.toLong(), offset + maxBytes).toInt())
+    }
+
     // Fixed clock and file times, so the rendered ages never drift between runs.
     override fun now() = NOW
 
@@ -951,6 +978,12 @@ private class FakeFileSystem(private val conflicted: Boolean = false) : FileSyst
 
     private companion object {
         const val NOW = 1_700_000_000L
+
+        val TRANSCRIPT = ("{\"type\":\"assistant\",\"cwd\":\"/repo\",\"requestId\":\"req_1\"," +
+            "\"message\":{\"id\":\"m\",\"model\":\"claude-opus-5\",\"usage\":{" +
+            "\"input_tokens\":1200,\"output_tokens\":48000,\"cache_read_input_tokens\":2400000," +
+            "\"cache_creation\":{\"ephemeral_1h_input_tokens\":31000,\"ephemeral_5m_input_tokens\":0}" +
+            "}}}\n").encodeToByteArray()
 
         val CONFLICTED_FILE = """
             package app

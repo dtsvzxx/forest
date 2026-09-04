@@ -47,6 +47,22 @@ interface FileSystemAccess {
     /** Epoch seconds of the last modification, or 0 when the path does not exist. */
     fun lastModifiedAt(path: String): Long
 
+    /** Entry names directly inside [path]; empty when it is missing or unreadable. */
+    fun listDirectory(path: String): List<String>
+
+    /** Size in bytes, or 0 when the path does not exist. */
+    fun fileSize(path: String): Long
+
+    /**
+     * Up to [maxBytes] bytes of [path] starting at [offset], for tailing a file that only grows.
+     *
+     * Bytes rather than text on purpose: the caller has to remember where it stopped, and a
+     * character offset cannot be turned back into a file position without re-reading everything
+     * before it. Returns empty when the file is shorter than [offset], which is how a truncated or
+     * replaced file is noticed.
+     */
+    fun readFrom(path: String, offset: Long, maxBytes: Int): ByteArray
+
     /** Epoch seconds now, for rendering timestamps as "5 minutes ago". */
     fun now(): Long
 }

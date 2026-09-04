@@ -17,6 +17,9 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.kotlinx.coroutinesCore)
+            // Only the runtime: usage transcripts are read with Json.parseToJsonElement, so there
+            // are no @Serializable classes and the serialization compiler plugin is not needed.
+            implementation(libs.kotlinx.serializationJson)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

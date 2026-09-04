@@ -294,6 +294,42 @@ Four constraints worth remembering:
 Dependencies: JediTerm and pty4j come from the JetBrains repository declared in
 `settings.gradle.kts`, not Maven Central. **JediTerm is LGPL 3.0** and is linked unmodified.
 
+## Usage statistics
+
+Each agent pane's header shows what Claude Code has spent in that pane's worktree — tokens and an
+estimated cost. The source is the transcript Claude Code writes for itself at
+`~/.claude/projects/<encoded cwd>/<sessionId>.jsonl`, not the terminal: it is the usage the API
+actually reported, reading it cannot disturb a running agent, and it covers *every* session in the
+worktree, including ones started from an ordinary terminal. `usage/UsageReader.kt` carries the
+alternatives that were rejected (screen-scraping JediTerm, an `ANTHROPIC_BASE_URL` proxy).
+
+Four things there are easy to get wrong, and each has a test:
+
+- **One response is written as several lines**, one per content block, each repeating the identical
+  `usage` object. A real transcript had 1050 assistant lines for 596 responses — summing lines
+  over-reports by ~1.8x. `TranscriptTail` de-duplicates on `requestId` and keeps that set *across*
+  polls, because a response's lines straddle the moment a poll stops.
+- **Cache writes are split by lifetime.** `cache_creation.ephemeral_1h_input_tokens` is billed at 2x
+  the input rate against 1.25x for the 5-minute one, and Claude Code uses the one-hour cache, so
+  collapsing them understates the largest line on the bill.
+- **The project directory name is lossy** — every character outside `[A-Za-z0-9-]` becomes `-`, so
+  `/` and `-` are indistinguishable and the worktree `feature` prefix-matches its *sibling*
+  `feature-two`. `UsageReader.claims` settles it by reading the `cwd` the transcript records.
+- **Subagents write their own files** under `<sessionId>/subagents/agent-*.jsonl`. Skipping them
+  under-reports every agent that delegates.
+
+`ModelPricing` is a table of list prices with the date it was taken; nothing on disk records a price
+(`additionalModelCostsCache` in `~/.claude.json` is empty), so the figure is always presented as an
+estimate. Fast mode is part of `ModelKey` because it doubles Opus rates.
+
+Reading is off `gitLock` and off the main thread — the first read of a session is the whole file and
+the largest on this machine is 59 MB — and only happens while the agent wall is on screen, driven by
+a `LaunchedEffect` there rather than a timer hidden in `AppState`.
+
+`UsageReaderTest` also runs against this machine's real transcripts, skipping when there are none;
+it cross-checks the response count against an independent text scan, which is what catches a change
+in the file format that fixtures cannot.
+
 ## Tests
 
 `AppRenderTest` (`desktopApp/src/test`) renders the window with `ImageComposeScene` against a fake
