@@ -1,0 +1,1016 @@
+package io.mainactor.worktree
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import io.mainactor.worktree.git.Git
+import io.mainactor.worktree.git.GitLogEntry
+import io.mainactor.worktree.git.GitParsers
+import io.mainactor.worktree.git.WorktreeActivity
+import io.mainactor.worktree.model.Branch
+import io.mainactor.worktree.model.ChangedFile
+import io.mainactor.worktree.model.CommitInfo
+import io.mainactor.worktree.model.ConflictSegment
+import io.mainactor.worktree.model.ConflictedFile
+import io.mainactor.worktree.model.FileDiff
+import io.mainactor.worktree.model.Project
+import io.mainactor.worktree.model.RepoOperation
+import io.mainactor.worktree.model.PaneNode
+import io.mainactor.worktree.model.RepoStatus
+import io.mainactor.worktree.model.SplitAxis
+import io.mainactor.worktree.model.contains
+import io.mainactor.worktree.model.removeLeaf
+import io.mainactor.worktree.model.sessions
+import io.mainactor.worktree.model.splitLeaf
+import io.mainactor.worktree.model.withFraction
+import io.mainactor.worktree.model.Resolution
+import io.mainactor.worktree.model.Worktree
+import io.mainactor.worktree.platform.CommandResult
+import io.mainactor.worktree.platform.DirectoryChooser
+import io.mainactor.worktree.platform.FileSystemAccess
+import io.mainactor.worktree.platform.SystemIntegration
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+
+/** What the right-hand pane is comparing. */
+enum class DiffMode {
+    /** Uncommitted changes in the selected worktree. */
+    WORKING_TREE,
+
+    /** Everything the worktree's branch carries on top of a chosen base ref. */
+    AGAINST_BASE,
+}
+
+enum class RightTab { CHANGES, CONFLICTS, LOG, CONSOLE }
+
+/** The two things the window can be: a repository, or a wall of agents working in it. */
+enum class AppMode { PROJECT, AGENTS }
+
+/** A transient message shown in the status bar / notification strip. */
+data class Notice(val text: String, val isError: Boolean)
+
+/** One embedded terminal tab. */
+data class TerminalSession(
+    val id: String,
+    val title: String,
+    val workDir: String,
+    /** The repository this pane's worktree belongs to; agents may span several. */
+    val projectPath: String? = null,
+)
+
+/** A pending "start an agent" request, waiting for the user to say where. */
+data class AgentRequest(
+    /** Which way to split the focused pane, or null to let the pane's shape decide. */
+    val axis: SplitAxis?,
+)
+
+/**
+ * Everything the UI reads and every action it can trigger.
+ *
+ * Git commands are serialised through [gitLock]: several of them write the index or `.git/`
+ * state, and running e.g. a refresh concurrently with a stage would race on `index.lock`.
+ * Read-only refreshes of *different* worktrees still fan out in parallel inside that lock.
+ */
+class AppState(
+    val git: Git,
+    private val fs: FileSystemAccess,
+    private val store: ProjectStore,
+    private val chooser: DirectoryChooser,
+    val system: SystemIntegration,
+    private val scope: CoroutineScope,
+    /** Lets the platform layer tear down the shell process behind a terminal tab we drop. */
+    private val onTerminalDisposed: (sessionId: String) -> Unit = {},
+) {
+    private val gitLock = Mutex()
+    private val activity = WorktreeActivity(fs)
+
+    // ---------------------------------------------------------------- projects
+
+    var projects by mutableStateOf<List<Project>>(emptyList())
+        private set
+    var project by mutableStateOf<Project?>(null)
+        private set
+
+    // ---------------------------------------------------------------- worktrees
+
+    var worktrees by mutableStateOf<List<Worktree>>(emptyList())
+        private set
+    var selectedWorktree by mutableStateOf<Worktree?>(null)
+        private set
+
+    /** Per-worktree summary, used for the dirty/ahead-behind badges in the worktree list. */
+    var worktreeStatuses by mutableStateOf<Map<String, RepoStatus>>(emptyMap())
+        private set
+
+    // ------------------------------------------------------- selected worktree
+
+    var status by mutableStateOf(RepoStatus.EMPTY)
+        private set
+    var branches by mutableStateOf<List<Branch>>(emptyList())
+        private set
+    var commits by mutableStateOf<List<CommitInfo>>(emptyList())
+        private set
+
+    var selectedFile by mutableStateOf<ChangedFile?>(null)
+        private set
+    var diff by mutableStateOf<FileDiff?>(null)
+        private set
+    var diffLoading by mutableStateOf(false)
+        private set
+
+    var diffMode by mutableStateOf(DiffMode.WORKING_TREE)
+        private set
+    var baseRef by mutableStateOf<String?>(null)
+        private set
+
+    /** In [DiffMode.AGAINST_BASE] the file list comes from a range diff rather than from status. */
+    var rangeDiffs by mutableStateOf<List<FileDiff>>(emptyList())
+        private set
+
+    // ---------------------------------------------------------------- conflicts
+
+    var conflictFile by mutableStateOf<ConflictedFile?>(null)
+        private set
+    var conflictLoading by mutableStateOf(false)
+        private set
+
+    // ---------------------------------------------------------------- chrome
+
+    var rightTab by mutableStateOf(RightTab.CHANGES)
+    var busy by mutableStateOf<String?>(null)
+        private set
+    var notice by mutableStateOf<Notice?>(null)
+    val gitLog = mutableStateListOf<GitLogEntry>()
+
+    var terminalVisible by mutableStateOf(false)
+        private set
+    var terminals by mutableStateOf<List<TerminalSession>>(emptyList())
+        private set
+    var activeTerminal by mutableStateOf<String?>(null)
+        private set
+
+    private var terminalSeq = 0
+    private var logSeq = 0L
+
+    /** Measured pane sizes, kept out of snapshot state: read when acting, never during layout. */
+    private val paneSizes = mutableMapOf<String, Pair<Int, Int>>()
+
+    // ---------------------------------------------------------------- agents
+
+    var mode by mutableStateOf(AppMode.PROJECT)
+        private set
+
+    /** The wall's split tree; null when nothing is running. */
+    var agentLayout by mutableStateOf<PaneNode?>(null)
+        private set
+
+    /** Every agent terminal on the wall, left to right and top to bottom. */
+    val agents: List<TerminalSession> get() = agentLayout?.sessions().orEmpty()
+
+    var focusedAgent by mutableStateOf<String?>(null)
+        private set
+
+    /** When set, that one pane fills the wall — the multiplexer's zoom. */
+    var zoomedAgent by mutableStateOf<String?>(null)
+        private set
+
+    /** The worktree the last agent was started in, used to seed the picker. */
+    var agentWorktree by mutableStateOf<Worktree?>(null)
+        private set
+
+    /** The in-flight background sweep of worktree badges; joinable, and cancelled when superseded. */
+    var badgeRefresh: Job? = null
+        private set
+
+    // ---------------------------------------------------------------- lifecycle
+
+    /** Returns the job that opens the restored project, so callers can await the first load. */
+    fun start(): Job? {
+        projects = store.load()
+        // The list order is the user's; which project to reopen is remembered separately.
+        val restore = store.lastOpened()?.takeIf { path -> projects.any { it.path == path } }
+        return (restore ?: projects.firstOrNull()?.path)?.let { openProject(it) }
+    }
+
+    fun recordGitLog(entry: GitLogEntry) {
+        gitLog += entry.copy(seq = ++logSeq)
+        if (gitLog.size > MAX_LOG_ENTRIES) gitLog.removeRange(0, gitLog.size - MAX_LOG_ENTRIES)
+    }
+
+    // ---------------------------------------------------------------- projects
+
+    fun chooseProject() = run("Opening repository") {
+        val picked = chooser.chooseDirectory("Open Git repository", fs.homeDir()) ?: return@run
+        openProjectAt(picked)
+    }
+
+    fun openProject(path: String) = run("Opening repository") { openProjectAt(path) }
+
+    private suspend fun openProjectAt(path: String, select: String? = null) {
+        val root = git.mainWorktree(path)
+        if (root == null) {
+            notice = Notice("${fs.nameOf(path)} is not a git repository", isError = true)
+            return
+        }
+        // A sweep still running for the previous repository has nothing useful left to say.
+        badgeRefresh?.cancel()
+        worktreeStatuses = emptyMap()
+        projects = store.add(projects, root)
+        store.setLastOpened(root)
+        project = projects.first { it.path == root }
+        selectedWorktree = null
+        baseRef = null
+        diffMode = DiffMode.WORKING_TREE
+        reloadProject(selectPath = select ?: root)
+    }
+
+    /** Opens the OS folder picker and hands the result back, for the "Browse…" buttons in dialogs. */
+    fun browseForDirectory(title: String, startIn: String?, onPicked: (String) -> Unit) {
+        scope.launch {
+            chooser.chooseDirectory(title, startIn ?: fs.homeDir())?.let(onPicked)
+        }
+    }
+
+    /** Sensible default parent directory for a new worktree: next to the repository itself. */
+    fun defaultWorktreeParent(): String {
+        val root = project?.path ?: return fs.homeDir()
+        return fs.parentOf(root) ?: fs.homeDir()
+    }
+
+    fun forgetProject(path: String) {
+        projects = store.remove(projects, path)
+        if (project?.path == path) closeProject()
+    }
+
+    fun closeProject() {
+        badgeRefresh?.cancel()
+        project = null
+        worktrees = emptyList()
+        worktreeStatuses = emptyMap()
+        selectedWorktree = null
+        status = RepoStatus.EMPTY
+        diff = null
+        selectedFile = null
+        terminals.forEach { onTerminalDisposed(it.id) }
+        terminals = emptyList()
+        activeTerminal = null
+        agents.forEach { onTerminalDisposed(it.id) }
+        agentLayout = null
+        paneSizes.clear()
+        focusedAgent = null
+        zoomedAgent = null
+        agentWorktree = null
+    }
+
+    /** Creates a brand-new repository in a directory the user picks. */
+    fun initNewProject() = run("Creating repository") {
+        val parent = chooser.chooseDirectory("Choose a folder for the new repository", fs.homeDir()) ?: return@run
+        val result = git.init(parent)
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        openProjectAt(parent)
+        notice = Notice("Initialised empty repository in ${fs.nameOf(parent)}", isError = false)
+    }
+
+    fun cloneProject(url: String, parentDir: String, folderName: String) = run("Cloning $url") {
+        val target = fs.resolve(parentDir, folderName)
+        val result = git.clone(url, target)
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        openProjectAt(target)
+        notice = Notice("Cloned into $folderName", isError = false)
+    }
+
+    // ---------------------------------------------------------------- refresh
+
+    fun refresh() = run("Refreshing") { reloadProject(selectPath = selectedWorktree?.path) }
+
+    private suspend fun reloadProject(selectPath: String?) {
+        val root = project?.path ?: return
+        val raw = git.worktrees(root)
+        val commitTimes = git.commitTimes(root, raw.mapNotNull { it.head }.filter(::isRealSha))
+        // Ordered on what we already know. The badge sweep refines it a moment later, once it has
+        // told us which files are dirty and therefore worth statting.
+        val list = withActivity(raw, commitTimes, worktreeStatuses)
+        worktrees = list
+
+        val target = selectPath?.let { wanted -> list.firstOrNull { samePath(it.path, wanted) } }
+            ?: list.firstOrNull()
+        selectedWorktree = target
+
+        // The worktree the user is looking at is loaded now; the badges for all the others catch
+        // up in the background. With dozens of worktrees, waiting for the whole sweep would put a
+        // third of a second between every click and the screen updating.
+        target?.let { loadWorktree(it) }
+        refreshBadges(root, list, commitTimes)
+    }
+
+    /**
+     * Refreshes the dirty/ahead-behind badges of every worktree.
+     *
+     * Runs outside [gitLock] and outside the caller's job: `git status` is read-only and
+     * `GIT_OPTIONAL_LOCKS=0` keeps it from touching `index.lock`, so it cannot collide with a
+     * command that writes the index. Only the newest sweep is kept — during a burst of actions the
+     * earlier ones have nothing left to say.
+     */
+    private fun refreshBadges(root: String, list: List<Worktree>, commitTimes: Map<String, Long>) {
+        badgeRefresh?.cancel()
+        badgeRefresh = scope.launch {
+            val statuses = sweepStatuses(list)
+            if (project?.path != root) return@launch
+            worktreeStatuses = statuses
+
+            // Uncommitted edits can only be dated once we know which files they are in.
+            val refined = withActivity(list, commitTimes, statuses)
+            if (refined != worktrees) {
+                worktrees = refined
+                selectedWorktree = selectedWorktree?.let { current ->
+                    refined.firstOrNull { it.path == current.path } ?: current
+                }
+            }
+        }
+    }
+
+    private suspend fun loadWorktree(worktree: Worktree) {
+        if (worktree.isBare) {
+            status = RepoStatus.EMPTY
+            branches = git.branches(worktree.path)
+            commits = emptyList()
+            return
+        }
+        // Independent read-only queries: issued together, because a serial chain of seven child
+        // processes is most of what the user feels after every click.
+        coroutineScope {
+            val statusAsync = async { git.status(worktree.path, detailed = true) }
+            val operationAsync = async { git.currentOperation(worktree.path) }
+            val branchesAsync = async { git.branches(worktree.path) }
+            val commitsAsync = async { git.log(worktree.path, limit = 150) }
+
+            status = statusAsync.await().copy(operation = operationAsync.await())
+            branches = branchesAsync.await()
+            commits = commitsAsync.await()
+        }
+
+        if (baseRef == null) baseRef = defaultBaseRef()
+
+        if (status.operation != RepoOperation.NONE && status.conflicts.isNotEmpty()) {
+            rightTab = RightTab.CONFLICTS
+        } else if (rightTab == RightTab.CONFLICTS && status.conflicts.isEmpty()) {
+            rightTab = RightTab.CHANGES
+        }
+
+        if (diffMode == DiffMode.AGAINST_BASE) loadRangeDiff()
+
+        // Keep the previously selected file selected across refreshes when it still has changes.
+        val keep = selectedFile?.path?.let { path -> status.files.firstOrNull { it.path == path } }
+        selectFileInternal(keep ?: status.files.firstOrNull())
+    }
+
+    /**
+     * Dates every worktree and orders the list by that, most recent first.
+     *
+     * The main working tree always comes first, whatever its activity. Everything after it is
+     * ordered by the newer of the HEAD commit and any file git currently reports as changed — so a
+     * worktree you edited five minutes ago outranks one you committed to yesterday. See
+     * [WorktreeActivity] for why the filesystem is consulted this narrowly.
+     *
+     * Worktrees with nothing to date — bare ones, or a branch with no commits yet — sort last.
+     */
+    private fun withActivity(
+        list: List<Worktree>,
+        commitTimes: Map<String, Long>,
+        statuses: Map<String, RepoStatus>,
+    ): List<Worktree> {
+        val now = fs.now()
+        return list
+            .map { worktree ->
+                if (worktree.isBare) return@map worktree
+                val commitAt = worktree.head?.let { commitTimes[it] } ?: 0L
+                val editedAt = activity.newestChangedFileAt(
+                    worktreePath = worktree.path,
+                    files = statuses[worktree.path]?.files.orEmpty(),
+                )
+                val newest = maxOf(commitAt, editedAt)
+                worktree.copy(
+                    lastCommitAt = commitAt.takeIf { it > 0L },
+                    lastActivityAt = newest.takeIf { it > 0L },
+                    lastActivityLabel = relativeTime(newest, now).takeIf { it.isNotEmpty() },
+                    activityReason = activityBreakdown(commitAt, editedAt, now),
+                )
+            }
+            .sortedWith(
+                // The main working tree is the repository itself, not one of the disposable
+                // checkouts around it, so it is pinned rather than shuffled by activity.
+                compareByDescending<Worktree> { it.isMain }
+                    .thenByDescending { it.lastActivityAt ?: Long.MIN_VALUE }
+                    .thenBy { it.label.lowercase() },
+            )
+    }
+
+    private fun activityBreakdown(commitAt: Long, editedAt: Long, now: Long): String =
+        buildList {
+            if (editedAt > 0L) add("uncommitted edit  ${relativeTime(editedAt, now)}")
+            if (commitAt > 0L) add("last commit       ${relativeTime(commitAt, now)}")
+        }.joinToString("\n")
+
+    /** git writes an all-zero HEAD for a branch that has no commits yet. */
+    private fun isRealSha(sha: String) = sha.isNotBlank() && sha.any { it != '0' }
+
+    /** Summary status of every non-bare worktree, with a bounded number of gits in flight. */
+    private suspend fun sweepStatuses(list: List<Worktree>): Map<String, RepoStatus> {
+        val gate = Semaphore(MAX_PARALLEL_STATUS)
+        return coroutineScope {
+            list.filterNot { it.isBare }
+                .map { wt -> async { wt.path to gate.withPermit { git.status(wt.path, detailed = false) } } }
+                .awaitAll()
+                .toMap()
+        }
+    }
+
+    /** git reports canonical paths; what the UI hands back may be the pre-symlink spelling. */
+    private fun samePath(a: String, b: String): Boolean =
+        a == b || fs.canonicalPath(a) == fs.canonicalPath(b)
+
+    private fun defaultBaseRef(): String? {
+        val mainBranch = worktrees.firstOrNull { it.isMain }?.branch
+        val candidates = listOfNotNull(mainBranch, "main", "master", "develop")
+        val names = branches.filterNot { it.isRemote }.map { it.name }.toSet()
+        return candidates.firstOrNull { it in names } ?: mainBranch
+    }
+
+    // ---------------------------------------------------------------- selection
+
+    fun selectWorktree(worktree: Worktree) = run(null) {
+        selectedWorktree = worktree
+        selectedFile = null
+        diff = null
+        conflictFile = null
+        loadWorktree(worktree)
+    }
+
+    fun selectFile(file: ChangedFile?) = run(null) { selectFileInternal(file) }
+
+    private suspend fun selectFileInternal(file: ChangedFile?) {
+        selectedFile = file
+        conflictFile = null
+        if (file == null) {
+            diff = null
+            return
+        }
+        val dir = selectedWorktree?.path ?: return
+        if (file.conflicted) {
+            rightTab = RightTab.CONFLICTS
+            loadConflict(file.path)
+            return
+        }
+        diffLoading = true
+        diff = try {
+            when {
+                file.untracked -> git.diffUntracked(dir, file.path).firstOrNull()
+                file.staged && !file.unstaged -> git.diff(dir, staged = true, path = file.path).firstOrNull()
+                else -> git.diff(dir, staged = false, path = file.path).firstOrNull()
+                    ?: git.diff(dir, staged = true, path = file.path).firstOrNull()
+            }
+        } finally {
+            diffLoading = false
+        }
+    }
+
+    fun selectRangeFile(fileDiff: FileDiff) {
+        selectedFile = null
+        conflictFile = null
+        diff = fileDiff
+    }
+
+    fun setDiffMode(mode: DiffMode) = run(null) {
+        diffMode = mode
+        diff = null
+        if (mode == DiffMode.AGAINST_BASE) loadRangeDiff() else selectFileInternal(status.files.firstOrNull())
+    }
+
+    fun setBaseRef(ref: String) = run(null) {
+        baseRef = ref
+        if (diffMode == DiffMode.AGAINST_BASE) loadRangeDiff()
+    }
+
+    private suspend fun loadRangeDiff() {
+        val dir = selectedWorktree?.path ?: return
+        val base = baseRef ?: return
+        diffLoading = true
+        rangeDiffs = try {
+            git.diffRange(dir, base, "HEAD")
+        } finally {
+            diffLoading = false
+        }
+        diff = rangeDiffs.firstOrNull()
+    }
+
+    // ---------------------------------------------------------------- worktree ops
+
+    fun createWorktree(
+        path: String,
+        newBranch: String?,
+        existingBranch: String?,
+        baseRef: String?,
+        force: Boolean,
+    ) = run("Creating worktree") {
+        val root = project?.path ?: return@run
+        val result = git.addWorktree(
+            dir = root,
+            path = path,
+            newBranch = newBranch,
+            existingBranch = existingBranch,
+            baseRef = baseRef,
+            force = force,
+        )
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        notice = Notice("Worktree created at ${fs.nameOf(path)}", isError = false)
+        reloadProject(selectPath = path)
+    }
+
+    fun removeWorktree(worktree: Worktree, force: Boolean) = run("Removing worktree") {
+        val root = project?.path ?: return@run
+        val result = git.removeWorktree(root, worktree.path, force)
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        terminals.filter { it.workDir == worktree.path }.forEach { onTerminalDisposed(it.id) }
+        terminals = terminals.filterNot { it.workDir == worktree.path }
+        if (activeTerminal !in terminals.map { it.id }) activeTerminal = terminals.lastOrNull()?.id
+        agents.filter { it.workDir == worktree.path }.forEach { doomed ->
+            onTerminalDisposed(doomed.id)
+            paneSizes.remove(doomed.id)
+            agentLayout = agentLayout?.removeLeaf(doomed.id)
+        }
+        if (focusedAgent !in agents.map { it.id }) focusedAgent = agents.lastOrNull()?.id
+        if (zoomedAgent !in agents.map { it.id }) zoomedAgent = null
+        if (agentWorktree?.path == worktree.path) agentWorktree = null
+        notice = Notice("Removed ${worktree.name}", isError = false)
+        reloadProject(selectPath = null)
+    }
+
+    fun pruneWorktrees() = run("Pruning worktrees") {
+        val root = project?.path ?: return@run
+        val result = git.pruneWorktrees(root)
+        if (!result.ok) fail(result) else notice = Notice("Pruned stale worktrees", isError = false)
+        reloadProject(selectPath = selectedWorktree?.path)
+    }
+
+    fun toggleLock(worktree: Worktree) = run(if (worktree.isLocked) "Unlocking" else "Locking") {
+        val root = project?.path ?: return@run
+        val result = if (worktree.isLocked) {
+            git.unlockWorktree(root, worktree.path)
+        } else {
+            git.lockWorktree(root, worktree.path, reason = null)
+        }
+        if (!result.ok) fail(result)
+        reloadProject(selectPath = worktree.path)
+    }
+
+    /**
+     * Points [worktree] at another branch.
+     *
+     * Picking a remote branch means "work on this branch here", so it creates the local tracking
+     * branch rather than detaching HEAD at the remote ref — unless a local branch of that name
+     * already exists, in which case that is what the user meant.
+     */
+    fun switchBranch(worktree: Worktree, branch: Branch) =
+        mutateIn(worktree.path, "Switching to ${branch.shortName}") { dir ->
+            when {
+                !branch.isRemote -> git.checkout(dir, branch.name)
+                branches.any { !it.isRemote && it.name == branch.shortName } ->
+                    git.checkout(dir, branch.shortName)
+                else -> git.checkoutTracking(dir, branch.shortName, branch.name)
+            }
+        }
+
+    fun switchToNewBranch(worktree: Worktree, name: String, startPoint: String?) =
+        mutateIn(worktree.path, "Creating $name") { dir ->
+            git.checkoutNewBranch(dir, name, startPoint)
+        }
+
+    // ---------------------------------------------------------------- index ops
+
+    fun stage(files: List<ChangedFile>) = mutate("Staging") { dir ->
+        git.stage(dir, files.map { it.path })
+    }
+
+    fun unstage(files: List<ChangedFile>) = mutate("Unstaging") { dir ->
+        git.unstage(dir, files.map { it.path })
+    }
+
+    fun stageAll() = mutate("Staging all") { dir -> git.stageAll(dir) }
+
+    fun discard(files: List<ChangedFile>) = mutate("Discarding") { dir ->
+        val tracked = files.filterNot { it.untracked }.map { it.path }
+        val untracked = files.filter { it.untracked }.map { it.path }
+        var result = CommandResult(0, "", "")
+        if (tracked.isNotEmpty()) result = git.discard(dir, tracked)
+        if (result.ok && untracked.isNotEmpty()) result = git.deleteUntracked(dir, untracked)
+        result
+    }
+
+    fun commit(message: String, amend: Boolean, stageAll: Boolean) = mutate("Committing") { dir ->
+        git.commit(dir, message, amend = amend, stageAll = stageAll)
+    }
+
+    // ---------------------------------------------------------------- remote ops
+
+    fun fetch() = mutate("Fetching") { dir -> git.fetch(dir) }
+
+    fun pull(rebase: Boolean) = mutate("Pulling") { dir -> git.pull(dir, rebase) }
+
+    fun push(force: Boolean = false) = mutate("Pushing") { dir ->
+        val branch = status.branch
+        val setUpstream = !status.hasUpstream && branch != null
+        git.push(dir, setUpstream = setUpstream, force = force, branch = branch)
+    }
+
+    // ---------------------------------------------------------------- integrate
+
+    fun merge(ref: String, noFastForward: Boolean) = mutate("Merging $ref") { dir ->
+        git.merge(dir, ref, noFastForward = noFastForward)
+    }
+
+    fun rebase(onto: String) = mutate("Rebasing onto $onto") { dir -> git.rebase(dir, onto) }
+
+    fun continueOperation() = mutate("Continuing ${status.operation.label}") { dir ->
+        git.continueOperation(dir, status.operation)
+    }
+
+    fun abortOperation() = mutate("Aborting ${status.operation.label}") { dir ->
+        git.abortOperation(dir, status.operation)
+    }
+
+    fun skipCommit() = mutate("Skipping commit") { dir -> git.skipOperation(dir, status.operation) }
+
+    // ---------------------------------------------------------------- conflicts
+
+    fun openConflict(path: String) = run(null) {
+        rightTab = RightTab.CONFLICTS
+        loadConflict(path)
+    }
+
+    private suspend fun loadConflict(path: String) {
+        val dir = selectedWorktree?.path ?: return
+        conflictLoading = true
+        conflictFile = try {
+            val full = fs.resolve(dir, path)
+            if (fs.exists(full)) GitParsers.parseConflicts(path, fs.readText(full)) else null
+        } catch (e: Exception) {
+            notice = Notice("Cannot read $path: ${e.message}", isError = true)
+            null
+        } finally {
+            conflictLoading = false
+        }
+    }
+
+    fun resolveRegion(regionId: Int, resolution: Resolution) {
+        val file = conflictFile ?: return
+        conflictFile = file.copy(
+            segments = file.segments.map { segment ->
+                if (segment is ConflictSegment.Conflict && segment.id == regionId) {
+                    segment.copy(resolution = resolution)
+                } else {
+                    segment
+                }
+            },
+        )
+    }
+
+    fun resolveAll(resolution: Resolution) {
+        val file = conflictFile ?: return
+        conflictFile = file.copy(
+            segments = file.segments.map { segment ->
+                if (segment is ConflictSegment.Conflict) segment.copy(resolution = resolution) else segment
+            },
+        )
+    }
+
+    /** Writes the resolved text back to disk and stages it, which is what marks it resolved to git. */
+    fun applyConflictResolution() = run("Saving resolution") {
+        val dir = selectedWorktree?.path ?: return@run
+        val file = conflictFile ?: return@run
+        if (!file.isFullyResolved) {
+            notice = Notice("${file.unresolvedCount} conflict(s) still unresolved", isError = true)
+            return@run
+        }
+        try {
+            fs.writeText(fs.resolve(dir, file.path), GitParsers.renderResolved(file))
+        } catch (e: Exception) {
+            notice = Notice("Cannot write ${file.path}: ${e.message}", isError = true)
+            return@run
+        }
+        val result = git.markResolved(dir, listOf(file.path))
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        notice = Notice("Resolved ${file.path}", isError = false)
+        conflictFile = null
+        reloadProject(selectPath = dir)
+    }
+
+    /** `git checkout --ours/--theirs` — takes one whole side of the file without editing regions. */
+    fun takeWholeSide(path: String, ours: Boolean) = run("Resolving $path") {
+        val dir = selectedWorktree?.path ?: return@run
+        val result = if (ours) git.takeOurs(dir, path) else git.takeTheirs(dir, path)
+        if (!result.ok) {
+            fail(result)
+            return@run
+        }
+        val staged = git.markResolved(dir, listOf(path))
+        if (!staged.ok) fail(staged)
+        conflictFile = null
+        reloadProject(selectPath = dir)
+    }
+
+    // ---------------------------------------------------------------- terminal
+
+    fun toggleTerminal() {
+        terminalVisible = !terminalVisible
+        if (terminalVisible && terminals.isEmpty()) openTerminal()
+    }
+
+    fun openTerminal(worktree: Worktree? = selectedWorktree) {
+        val target = worktree ?: return
+        terminalSeq++
+        val session = TerminalSession(
+            id = "term-$terminalSeq-${target.path.hashCode()}",
+            title = target.label,
+            workDir = target.path,
+        )
+        terminals = terminals + session
+        activeTerminal = session.id
+        terminalVisible = true
+    }
+
+    fun closeTerminal(id: String) {
+        onTerminalDisposed(id)
+        terminals = terminals.filterNot { it.id == id }
+        if (activeTerminal == id) activeTerminal = terminals.lastOrNull()?.id
+        if (terminals.isEmpty()) terminalVisible = false
+    }
+
+    fun selectTerminal(id: String) {
+        activeTerminal = id
+        terminalVisible = true
+    }
+
+    // ---------------------------------------------------------------- agents
+
+    fun switchTo(next: AppMode) {
+        mode = next
+        // Nothing is started automatically. Opening a repository or the agent wall should not
+        // spawn a shell the user did not ask for; both offer the action instead.
+        if (next == AppMode.AGENTS && agentWorktree == null) agentWorktree = selectedWorktree
+    }
+
+    /**
+     * Reads the worktrees of any remembered project for the new-agent picker, ordered exactly the
+     * way the worktrees pane orders them: the main working tree pinned, then by last activity.
+     *
+     * The status sweep that dates uncommitted work runs outside [gitLock] — it is read-only, and
+     * `GIT_OPTIONAL_LOCKS=0` keeps it off `index.lock` — so browsing another repository in the
+     * picker never blocks what the window is doing.
+     */
+    fun worktreesOf(target: Project, onLoaded: (List<Worktree>) -> Unit): Job = scope.launch {
+        val (raw, times) = gitLock.withLock {
+            val list = git.worktrees(target.path)
+            list to git.commitTimes(target.path, list.mapNotNull { it.head }.filter(::isRealSha))
+        }
+        val statuses = if (samePath(target.path, project?.path.orEmpty())) {
+            worktreeStatuses
+        } else {
+            sweepStatuses(raw)
+        }
+        onLoaded(withActivity(raw, times, statuses))
+    }
+
+    fun chooseAgentWorktree(worktree: Worktree) {
+        agentWorktree = worktree
+    }
+
+    /**
+     * Opens another terminal on the wall, splitting the focused pane.
+     *
+     * With no [axis] the split follows the focused pane's own shape — a wide pane divides into
+     * columns, a tall one into rows — which is what keeps repeated "new agent" from degenerating
+     * into a row of slivers.
+     *
+     * Several agents in one worktree is the normal case, not the exception: they share a checkout
+     * on purpose, so panes are numbered per worktree rather than one-per-directory.
+     */
+    fun openAgent(
+        worktree: Worktree? = agentWorktree ?: selectedWorktree,
+        axis: SplitAxis? = null,
+        projectPath: String? = project?.path,
+    ) {
+        val target = worktree ?: return
+        if (target.isBare) return
+
+        terminalSeq++
+        val ordinal = agents.count { it.workDir == target.path } + 1
+        val session = TerminalSession(
+            id = "agent-$terminalSeq-${target.path.hashCode()}",
+            title = "${target.label} · $ordinal",
+            workDir = target.path,
+            projectPath = projectPath,
+        )
+
+        val tree = agentLayout
+        val focused = focusedAgent?.takeIf { tree?.contains(it) == true }
+        agentLayout = when {
+            tree == null -> PaneNode.Leaf(session)
+            focused == null -> PaneNode.Split(
+                id = "split-$terminalSeq",
+                axis = axis ?: SplitAxis.ROW,
+                first = tree,
+                second = PaneNode.Leaf(session),
+            )
+            else -> tree.splitLeaf(
+                targetId = focused,
+                axis = axis ?: autoSplitAxis(focused),
+                session = session,
+                splitId = "split-$terminalSeq",
+            )
+        }
+        focusedAgent = session.id
+        zoomedAgent = null
+        agentWorktree = target
+    }
+
+    private fun autoSplitAxis(paneId: String): SplitAxis {
+        val size = paneSizes[paneId] ?: return SplitAxis.ROW
+        return if (size.first >= size.second) SplitAxis.ROW else SplitAxis.COLUMN
+    }
+
+    /** Panes report their measured size so a new split can follow the shape of what it divides. */
+    fun recordAgentPaneSize(id: String, width: Int, height: Int) {
+        paneSizes[id] = width to height
+    }
+
+    fun resizeAgentSplit(splitId: String, fraction: Float) {
+        agentLayout = agentLayout?.withFraction(splitId, fraction)
+    }
+
+    fun closeAgent(id: String) {
+        onTerminalDisposed(id)
+        paneSizes.remove(id)
+        agentLayout = agentLayout?.removeLeaf(id)
+        if (focusedAgent == id) focusedAgent = agents.lastOrNull()?.id
+        if (zoomedAgent == id) zoomedAgent = null
+    }
+
+    /**
+     * Asks the window to open the new-agent picker.
+     *
+     * Splitting always asks where the new pane should run. Agents are commonly spread across
+     * several repositories, so "split right" is how a pane on a *different* worktree gets started
+     * — inheriting the divided pane's worktree would make that impossible. The picker opens on the
+     * focused pane's own worktree, so staying put is still just a confirmation.
+     *
+     * The dialog is App's own state, and the shortcut that triggers it arrives from a global key
+     * hook outside the composition, so it travels as a request the window observes and clears.
+     */
+    var agentRequest by mutableStateOf<AgentRequest?>(null)
+        private set
+
+    fun requestNewAgent(axis: SplitAxis? = null) {
+        agentRequest = AgentRequest(axis)
+    }
+
+    fun clearAgentRequest() {
+        agentRequest = null
+    }
+
+    /** The pane a split would divide, which is what the picker starts from. */
+    val focusedAgentSession: TerminalSession?
+        get() = agents.firstOrNull { it.id == focusedAgent } ?: agents.lastOrNull()
+
+    fun closeFocusedAgent() {
+        focusedAgent?.let(::closeAgent)
+    }
+
+    fun toggleFocusedAgentZoom() {
+        focusedAgent?.let(::toggleAgentZoom)
+    }
+
+    /**
+     * Leaves the wall and shows this pane's worktree in the project view, opening its repository
+     * first when the pane belongs to one that is not currently loaded.
+     */
+    fun showWorktreeInProject(session: TerminalSession) = run("Opening worktree") {
+        val owner = session.projectPath
+        if (owner != null && !samePath(owner, project?.path.orEmpty())) {
+            openProjectAt(owner, select = session.workDir)
+        } else {
+            reloadProject(selectPath = session.workDir)
+        }
+        mode = AppMode.PROJECT
+    }
+
+    /** How many agents are running in [worktree], for the worktree menu. */
+    fun agentCountFor(worktree: Worktree): Int = agents.count { it.workDir == worktree.path }
+
+    /** Starts an agent in a worktree the user has already named, and shows the wall. */
+    fun startAgentFor(worktree: Worktree) {
+        switchTo(AppMode.AGENTS)
+        openAgent(worktree)
+    }
+
+    /** Takes the user to the agent already running in [worktree]. */
+    fun focusAgentFor(worktree: Worktree) {
+        val session = agents.lastOrNull { it.workDir == worktree.path } ?: return
+        switchTo(AppMode.AGENTS)
+        // A different pane may be zoomed; show the wall rather than swapping one zoom for another.
+        zoomedAgent = null
+        focusAgent(session.id)
+    }
+
+    fun focusAgent(id: String) {
+        focusedAgent = id
+    }
+
+    fun toggleAgentZoom(id: String) {
+        zoomedAgent = if (zoomedAgent == id) null else id
+        focusedAgent = id
+    }
+
+    // ---------------------------------------------------------------- plumbing
+
+    /** Runs [block] as the single in-flight git action, showing [label] in the status bar. */
+    private fun run(label: String?, block: suspend () -> Unit): Job =
+        scope.launch {
+            gitLock.withLock {
+                if (label != null) busy = label
+                try {
+                    block()
+                } catch (e: Exception) {
+                    notice = Notice(e.message ?: e::class.simpleName.orEmpty(), isError = true)
+                } finally {
+                    if (label != null) busy = null
+                }
+            }
+        }
+
+    /** A git action against the selected worktree that always refreshes afterwards. */
+    private fun mutate(label: String, block: suspend (dir: String) -> CommandResult): Job = run(label) {
+        val dir = selectedWorktree?.path ?: return@run
+        runIn(dir, block)
+    }
+
+    /** The same, for an action aimed at a worktree that is not necessarily the selected one. */
+    private fun mutateIn(dir: String, label: String, block: suspend (dir: String) -> CommandResult): Job =
+        run(label) { runIn(dir, block) }
+
+    private suspend fun runIn(dir: String, block: suspend (dir: String) -> CommandResult) {
+        val result = block(dir)
+        if (!result.ok) {
+            fail(result)
+        } else {
+            result.message.takeIf { it.isNotBlank() }?.let { notice = Notice(it.lines().first(), isError = false) }
+        }
+        reloadProject(selectPath = dir)
+    }
+
+    private fun fail(result: CommandResult) {
+        notice = Notice(result.message.ifBlank { "git exited with ${result.exitCode}" }, isError = true)
+    }
+
+    private companion object {
+        const val MAX_LOG_ENTRIES = 500
+
+        /** Refreshing a repository with dozens of worktrees should not fork dozens of gits at once. */
+        const val MAX_PARALLEL_STATUS = 8
+
+
+    }
+}
+
+val RepoOperation.label: String
+    get() = when (this) {
+        RepoOperation.NONE -> ""
+        RepoOperation.MERGE -> "merge"
+        RepoOperation.REBASE -> "rebase"
+        RepoOperation.CHERRY_PICK -> "cherry-pick"
+        RepoOperation.REVERT -> "revert"
+        RepoOperation.BISECT -> "bisect"
+    }

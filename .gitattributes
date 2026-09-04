@@ -1,0 +1,10 @@
+# The Windows launcher is read by cmd.exe, which needs CRLF; everything else is LF.
+*.bat text eol=crlf
+gradlew text eol=lf
+
+# The icons are generated binaries — never touch their bytes, or the staleness
+# check in IconAssetsTest starts failing on whoever checked them out.
+*.png binary
+*.ico binary
+*.icns binary
+*.jar binary
