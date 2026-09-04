@@ -309,6 +309,44 @@ knowing, and each is pinned by a test:
   those, since that path is how a pane's usage is found and how "show worktree in project" gets
   back. Git refuses on the main working tree, so the dialog only offers its branch.
 
+## Releasing
+
+```bash
+./gradlew :desktopApp:packageDmg     # → desktopApp/build/compose/binaries/main/dmg/Forest-<v>.dmg
+```
+
+Verified on this machine: an 81 MB DMG holding a 142 MB bundle, `LSMinimumSystemVersion` 11.0,
+`io.mainactor.forest`, the developer-tools category, the drawn `.icns`, and a trimmed 10-module
+runtime that does contain `jdk.unsupported` — JNA needs it, and pty4j needs JNA, so a runtime
+without it fails the first time a pane opens rather than at build time. Launched with the
+environment Finder actually gives an app (`PATH=/usr/bin:/bin:/usr/sbin:/sbin` and nothing else) it
+starts and finds git; `GitLocator` and `FileSystemAccess.findOnPath` both carry fallback directories
+for exactly that reason.
+
+**The build is unsigned and arm64-only.** jpackage ad-hoc signs the binary, which is enough to run
+where it was built and not enough to hand to anyone: `spctl -a` rejects it, and a *downloaded* copy
+carries the quarantine flag and is refused outright. Two ways forward:
+
+- Locally, `xattr -dr com.apple.quarantine /Applications/Forest.app` after installing.
+- Properly, a Developer ID identity and notarization. The build reads both from the environment and
+  is inert without them — `FOREST_MACOS_SIGNING_IDENTITY` (or `-Pforest.macos.signingIdentity`) turns
+  signing on, and `FOREST_APPLE_ID` / `FOREST_APPLE_PASSWORD` / `FOREST_APPLE_TEAM_ID` feed
+  `notarizeDmg`.
+
+An Intel Mac cannot run it: the bundled runtime and Skiko's native library are both arm64. A
+universal build needs two runtimes and is not set up.
+
+**Notices ship inside the bundle**, at `Contents/app/resources/THIRD-PARTY-NOTICES.md`, via
+`appResourcesRootDir`. Not via `licenseFile` — that turns the DMG into an image with a click-through
+agreement that has to be accepted before it will even mount, which also breaks any scripted
+`hdiutil attach`. JediTerm is LGPL 3.0, pty4j is EPL 1.0 and JNA is LGPL/Apache dual, so the notices
+are an obligation rather than a courtesy; every licence in that file was read from the artifact's own
+POM except SLF4J's, which declares none. `PackagingTest` fails if the file goes missing or stops
+naming the copyleft ones — regenerate it against the built distribution when dependencies change.
+
+`windows.upgradeUuid` is fixed for the life of the product: MSI decides upgrade-versus-second-copy by
+that id.
+
 ## Agents a pane can run
 
 A pane used to be a login shell and nothing else. It now runs whatever agent was chosen for it, and

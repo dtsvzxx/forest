@@ -89,6 +89,20 @@ selection away. The wall is therefore not tied to the project the rest of the wi
 picker lists worktrees in the same order as the Worktrees pane — main pinned, then by last
 activity — and shows the same ages, so the two never disagree about which one you were last in.
 
+## Building an installer
+
+```bash
+./gradlew :desktopApp:packageDmg   # macOS · also packageMsi, packageDeb
+```
+
+The DMG is unsigned and arm64-only. It runs on the machine that built it, but a copy downloaded from
+anywhere is quarantined and Gatekeeper will refuse it until either you clear the flag
+(`xattr -dr com.apple.quarantine /Applications/Forest.app`) or the build is signed with a Developer
+ID and notarized — set `FOREST_MACOS_SIGNING_IDENTITY`, `FOREST_APPLE_ID`, `FOREST_APPLE_PASSWORD`
+and `FOREST_APPLE_TEAM_ID` and the build picks them up.
+
+Third-party notices ship inside the bundle at `Contents/app/resources/THIRD-PARTY-NOTICES.md`.
+
 The icon is drawn in code, not shipped as artwork: `ui/components/Logo.kt` paints a git branch graph
 shaped like a tree, and `./gradlew :desktopApp:generateIcons` renders it out to
 `desktopApp/icons/forest.{png,ico,icns}` — one committed file per platform, all from the same

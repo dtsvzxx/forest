@@ -23,6 +23,19 @@ dependencies {
     testImplementation(libs.kotlinx.coroutinesCore)
 }
 
+/**
+ * Signing and notarization are read from the environment and are inert without it.
+ *
+ * A build with no identity still produces a working `.app` and `.dmg` — jpackage ad-hoc signs the
+ * arm64 binary, which is enough to run on the machine that built it. It is *not* enough to hand to
+ * anyone: a downloaded copy carries the quarantine flag and Gatekeeper refuses it. That needs a
+ * Developer ID identity and notarization, and neither belongs in a repository.
+ */
+val macSigningIdentity: Provider<String> =
+    providers.gradleProperty("forest.macos.signingIdentity")
+        .orElse(providers.environmentVariable("FOREST_MACOS_SIGNING_IDENTITY"))
+        .orElse("")
+
 compose.desktop {
     application {
         mainClass = "io.mainactor.worktree.MainKt"
@@ -32,6 +45,13 @@ compose.desktop {
             packageName = "Forest"
             packageVersion = "1.0.0"
             description = "Forest — a git worktree manager"
+            vendor = "mainactor"
+            copyright = "© 2026 mainactor"
+            // JediTerm is LGPL and pty4j is EPL, so the binary has to carry their notices — but
+            // *not* through `licenseFile`, which turns the DMG into an image with a click-through
+            // agreement that has to be accepted before it will even mount. The notices ship inside
+            // the bundle instead, under `Contents/app/resources`.
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("packaging"))
 
             // pty4j + JediTerm reach for these at runtime through reflection/JNA.
             modules("java.instrument", "jdk.unsupported", "java.management")
@@ -41,8 +61,30 @@ compose.desktop {
             macOS {
                 iconFile.set(project.file("icons/forest.icns"))
                 bundleID = "io.mainactor.forest"
+                dockName = "Forest"
+                appCategory = "public.app-category.developer-tools"
+                // jpackage writes 10.13 by default, which this cannot honour: the bundled runtime
+                // is an arm64 JDK 21 and the app has never been built for anything older.
+                minimumSystemVersion = "11.0"
+
+                signing {
+                    sign.set(macSigningIdentity.map { it.isNotBlank() })
+                    identity.set(macSigningIdentity)
+                }
+                notarization {
+                    appleID.set(providers.environmentVariable("FOREST_APPLE_ID").orElse(""))
+                    password.set(providers.environmentVariable("FOREST_APPLE_PASSWORD").orElse(""))
+                    teamID.set(providers.environmentVariable("FOREST_APPLE_TEAM_ID").orElse(""))
+                }
             }
-            windows { iconFile.set(project.file("icons/forest.ico")) }
+            windows {
+                iconFile.set(project.file("icons/forest.ico"))
+                // Fixed for the life of the product: MSI decides what is an upgrade and what is a
+                // second copy by this id, so generating one per build installs Forest beside Forest.
+                upgradeUuid = "0A93B03E-AB53-44F7-96B6-A3A85D014BE9"
+                menuGroup = "Forest"
+                shortcut = true
+            }
             linux { iconFile.set(project.file("icons/forest.png")) }
         }
     }
