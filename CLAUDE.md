@@ -331,8 +331,26 @@ A release has to be both. Apple will not notarize an unsigned build, and macOS w
 
 ```bash
 export FOREST_MACOS_SIGNING_IDENTITY="Developer ID Application: Dmitry Tsvetkov (7FCH84EN89)"
-./gradlew :desktopApp:stapleDmg      # packages, signs, submits, waits, staples
+./gradlew :desktopApp:stapleDmg      # packages, hardens, signs, submits, waits, staples
 ```
+
+Done and verified: Apple returned **Accepted**, the ticket is stapled, and a copy of the DMG carrying
+the quarantine flag — what a download actually looks like — is `accepted, source=Notarized Developer
+ID`, as is the app inside it.
+
+Two steps in that chain exist because the first submission came back **Invalid**, and both are easy
+to leave out:
+
+- **`hardenEmbeddedNatives`.** Notarization looks *inside* jars. The Compose plugin signs the native
+  libraries it finds there by extension, and pty4j ships an executable with no extension —
+  `resources/com/pty4j/native/darwin/pty4j-unix-spawn-helper`, signed by JetBrains with
+  `flags=0x0(none)`. It passes `codesign --verify --deep --strict` and Apple rejects it with "The
+  executable does not have the hardened runtime enabled". `packaging/harden-embedded-natives.sh`
+  re-signs anything Mach-O that is not already hardened, so the next dependency to bury a binary
+  does not cost another round trip. It skips `.class` entries, which is most of the speed and also
+  sidesteps a fat Mach-O header and a Java class file sharing the `CAFEBABE` magic number.
+- **`signDmg`.** The disk image itself needs a signature. Without one the app inside is notarized and
+  passes, while the container the user double-clicks reports "no usable signature".
 
 Signing is verified working: full Developer ID chain, secure timestamp, `flags=0x10000(runtime)`,
 `codesign --verify --deep --strict` clean, and the signed hardened-runtime build starts under a

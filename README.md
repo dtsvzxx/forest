@@ -104,9 +104,9 @@ export FOREST_MACOS_SIGNING_IDENTITY="Developer ID Application: Dmitry Tsvetkov 
 ./gradlew :desktopApp:stapleDmg
 ```
 
-That packages, signs with a hardened runtime, submits to Apple, waits, and staples the ticket to the
-image so it verifies without a network. The password stays in the keychain and never reaches a
-command line.
+That packages, hardens the binaries buried inside the bundled jars, signs the app and the image,
+submits to Apple, waits, and staples the ticket so it verifies without a network. The password stays
+in the keychain and never reaches a command line.
 
 Third-party notices ship inside the bundle at `Contents/app/resources/THIRD-PARTY-NOTICES.md`.
 

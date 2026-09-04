@@ -71,6 +71,9 @@ compose.desktop {
                 // jpackage writes 10.13 by default, which this cannot honour: the bundled runtime
                 // is an arm64 JDK 21 and the app has never been built for anything older.
                 minimumSystemVersion = "11.0"
+                // Pinned rather than left to the plugin's default so the re-signing below applies
+                // exactly the same set; the two drifting apart would change how the app behaves.
+                entitlementsFile.set(project.file("packaging/entitlements.plist"))
 
                 signing {
                     sign.set(macSigningIdentity.map { it.isNotBlank() })
@@ -99,6 +102,34 @@ compose.desktop {
 }
 
 /**
+ * Hardens the Mach-O binaries buried inside the bundled jars, which notarization inspects.
+ *
+ * The work is a shell script rather than a task class: it is entirely codesign, file, unzip and
+ * zip, it only ever runs on macOS, and when Apple rejects something the script is the thing you
+ * want to be able to run by hand against a built bundle. Its header explains what it is for.
+ */
+val hardenNatives = tasks.register<Exec>("hardenEmbeddedNatives") {
+    group = "compose desktop"
+    description = "Re-signs Mach-O binaries buried in the bundled jars, which notarization inspects."
+    dependsOn("createDistributable")
+    // Resolved here into a plain String: a lambda below that read the script's own property would
+    // capture the build script itself, which the configuration cache cannot serialise.
+    val identity = macSigningIdentity.get()
+    // It edits the app image in place, so it is never up to date.
+    outputs.upToDateWhen { false }
+    // Nothing to harden in an unsigned build, and codesign would have no identity to use.
+    onlyIf { identity.isNotBlank() }
+    commandLine(
+        project.file("packaging/harden-embedded-natives.sh").absolutePath,
+        layout.buildDirectory.dir("compose/binaries/main/app/Forest.app").get().asFile.absolutePath,
+        identity,
+        project.file("packaging/entitlements.plist").absolutePath,
+    )
+}
+
+tasks.matching { it.name == "packageDmg" }.configureEach { dependsOn(hardenNatives) }
+
+/**
  * Notarization against credentials kept in the keychain.
  *
  * Apple will not notarize an unsigned build, and macOS will not run a *downloaded* signed build that
@@ -122,10 +153,30 @@ val notaryProfile: Provider<String> =
 
 val dmgFile = layout.buildDirectory.file("compose/binaries/main/dmg/Forest-$appVersion.dmg")
 
+/**
+ * Signs the disk image itself, not just the app inside it.
+ *
+ * Without this the image has "no usable signature": the app within is notarized and passes, but the
+ * container the user actually double-clicks carries nothing of its own. Signing it before
+ * notarization is what makes the whole download verifiable rather than only its contents.
+ */
+val signDmg = tasks.register<Exec>("signDmg") {
+    group = "compose desktop"
+    description = "Signs the disk image with the Developer ID, before it goes to Apple."
+    dependsOn("packageDmg")
+    val identity = macSigningIdentity.get()
+    outputs.upToDateWhen { false }
+    onlyIf { identity.isNotBlank() }
+    commandLine(
+        "codesign", "--force", "--timestamp", "-s", identity,
+        dmgFile.get().asFile.absolutePath,
+    )
+}
+
 val submitDmg = tasks.register<Exec>("submitDmgForNotarization") {
     group = "compose desktop"
     description = "Uploads the DMG to Apple and waits for the verdict."
-    dependsOn("packageDmg")
+    dependsOn(signDmg)
     commandLine(
         "xcrun", "notarytool", "submit",
         dmgFile.get().asFile.absolutePath,
