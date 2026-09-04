@@ -18,6 +18,9 @@ import io.mainactor.worktree.model.Project
 import io.mainactor.worktree.model.RepoOperation
 import io.mainactor.worktree.model.PaneNode
 import io.mainactor.worktree.model.RepoStatus
+import io.mainactor.worktree.model.AgentSpec
+import io.mainactor.worktree.model.BuiltInAgents
+import io.mainactor.worktree.model.ProjectAgents
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.model.contains
 import io.mainactor.worktree.model.removeLeaf
@@ -69,6 +72,14 @@ data class TerminalSession(
     val workDir: String,
     /** The repository this pane's worktree belongs to; agents may span several. */
     val projectPath: String? = null,
+    /**
+     * The command line the pane starts with, already resolved to resume or begin.
+     *
+     * Null is a plain login shell, which is what every pane was before agents could be chosen.
+     */
+    val command: String? = null,
+    /** Which agent this pane was started as, for the header and for the picker's default. */
+    val agentId: String? = null,
 )
 
 /** A pending "start an agent" request, waiting for the user to say where. */
@@ -262,6 +273,20 @@ class AppState(
         private set
 
     private val usageReader = UsageReader(fs)
+    private val agentStore = AgentSettingsStore(fs)
+
+    /**
+     * Which agents the open project offers.
+     *
+     * A project nobody has configured offers every built-in whose executable could be found, so the
+     * setting exists to take something away or to add a command of your own — not to switch the
+     * feature on.
+     */
+    var projectAgents by mutableStateOf(ProjectAgents())
+        private set
+
+    /** The agents to offer when starting a pane, built-ins first. */
+    val availableAgents: List<AgentSpec> get() = projectAgents.available()
 
     /** When set, that one pane fills the wall — the multiplexer's zoom. */
     var zoomedAgent by mutableStateOf<String?>(null)
@@ -310,6 +335,7 @@ class AppState(
         worktreeStatuses = emptyMap()
         projects = store.add(projects, root)
         store.setLastOpened(root)
+        projectAgents = agentStore.forProjectOrDefault(root)
         project = projects.first { it.path == root }
         selectedWorktree = null
         baseRef = null
@@ -1055,6 +1081,35 @@ class AppState(
         agentWorktree = worktree
     }
 
+    /** Whether this agent's executable could be found; see [FileSystemAccess.findOnPath]. */
+    fun isAgentInstalled(agent: AgentSpec): Boolean {
+        val executable = BuiltInAgents.executableOf(agent) ?: return true
+        return fs.findOnPath(executable) != null
+    }
+
+    /** Replaces the open project's agent settings and writes them out. */
+    fun saveProjectAgents(agents: ProjectAgents) {
+        projectAgents = agents
+        val path = project?.path ?: return
+        scope.launch { agentStore.setForProject(path, agents) }
+    }
+
+    /**
+     * The command a pane should start with, resuming when there is something to resume.
+     *
+     * Both supported CLIs scope "most recent session" to the working directory, which is exactly
+     * the worktree the pane runs in — so continuing is one flag and needs no session id. Whether
+     * there *is* a session is asked first rather than discovered by running a command that fails:
+     * Forest already reads both tools' session logs, so it can simply look.
+     */
+    private fun commandFor(agent: AgentSpec, worktreePath: String): String? {
+        if (agent.isShell) return null
+        val resume = agent.resumeCommand
+        val tool = agent.tool
+        if (resume == null || tool == null) return agent.command
+        return if (usageReader.hasSessions(worktreePath, tool)) resume else agent.command
+    }
+
     /**
      * Opens another terminal on the wall, splitting the focused pane.
      *
@@ -1069,17 +1124,44 @@ class AppState(
         worktree: Worktree? = agentWorktree ?: selectedWorktree,
         axis: SplitAxis? = null,
         projectPath: String? = project?.path,
-    ) {
-        val target = worktree ?: return
-        if (target.isBare) return
+        agent: AgentSpec? = null,
+    ): Job? {
+        val target = worktree ?: return null
+        if (target.isBare) return null
 
+        // Only a resumable agent needs anything read from disk. Everything else — a plain shell, a
+        // command the user typed — opens straight away, which is also what keeps a pane appearing
+        // the instant a hotkey is pressed.
+        if (agent == null || agent.resumeCommand == null || agent.tool == null) {
+            addPane(target, axis, projectPath, agent, agent?.command?.takeIf { it.isNotBlank() })
+            return null
+        }
+
+        // Choosing between resume and a fresh start reads both tools' session logs, and on a
+        // machine with a long history that is not work for the thread painting the wall.
+        return scope.launch {
+            val command = withContext(Dispatchers.IO) { commandFor(agent, target.path) }
+            addPane(target, axis, projectPath, agent, command)
+        }
+    }
+
+    private fun addPane(
+        target: Worktree,
+        axis: SplitAxis?,
+        projectPath: String?,
+        agent: AgentSpec?,
+        command: String?,
+    ) {
         terminalSeq++
         val ordinal = agents.count { it.workDir == target.path } + 1
+        val label = if (agent == null || agent.isShell) "$ordinal" else "${agent.name} $ordinal"
         val session = TerminalSession(
             id = "agent-$terminalSeq-${target.path.hashCode()}",
-            title = "${target.label} · $ordinal",
+            title = "${target.label} · $label",
             workDir = target.path,
             projectPath = projectPath,
+            command = command,
+            agentId = agent?.id,
         )
 
         val tree = agentLayout
@@ -1178,9 +1260,9 @@ class AppState(
     fun agentCountFor(worktree: Worktree): Int = agents.count { it.workDir == worktree.path }
 
     /** Starts an agent in a worktree the user has already named, and shows the wall. */
-    fun startAgentFor(worktree: Worktree) {
+    fun startAgentFor(worktree: Worktree, agent: AgentSpec? = availableAgents.firstOrNull()): Job? {
         switchTo(AppMode.AGENTS)
-        openAgent(worktree)
+        return openAgent(worktree, agent = agent)
     }
 
     /** Takes the user to the agent already running in [worktree]. */

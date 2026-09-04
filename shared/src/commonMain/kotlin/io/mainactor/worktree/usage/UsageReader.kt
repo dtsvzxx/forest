@@ -7,8 +7,19 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** One agent CLI's on-disk record of what it spent. */
 interface UsageSource {
+    val tool: AgentTool
+
     /** Everything that tool has spent in [worktreePath], as of now. */
     fun read(worktreePath: String): WorktreeUsage
+
+    /**
+     * Whether the tool has ever run in [worktreePath].
+     *
+     * Cheaper than [read] and answers a different question: it decides whether starting an agent
+     * there should resume the last session or begin a new one, so it must not depend on any of
+     * those sessions having spent a token.
+     */
+    fun hasSessions(worktreePath: String): Boolean
 
     /** Drops every cached file position. */
     fun forgetAll()
@@ -54,6 +65,8 @@ class ClaudeTranscript(path: String) {
  */
 class ClaudeUsageSource(private val fs: FileSystemAccess) : UsageSource {
 
+    override val tool = AgentTool.CLAUDE
+
     private val transcripts = HashMap<String, ClaudeTranscript>()
     private val cwds = HashMap<String, String>()
 
@@ -79,6 +92,15 @@ class ClaudeUsageSource(private val fs: FileSystemAccess) : UsageSource {
                 }
             }
         return total
+    }
+
+    override fun hasSessions(worktreePath: String): Boolean {
+        val root = fs.resolve(fs.homeDir(), PROJECTS_DIR)
+        if (!fs.isDirectory(root)) return false
+        val prefix = encodeProjectDir(worktreePath)
+        return fs.listDirectory(root)
+            .filter { name -> claims(root, name, prefix, worktreePath) }
+            .any { dir -> fs.listDirectory(fs.resolve(root, dir)).any { it.endsWith(TRANSCRIPT_SUFFIX) } }
     }
 
     override fun forgetAll() {
@@ -184,6 +206,12 @@ class UsageReader(private val fs: FileSystemAccess) {
     fun read(worktreePath: String): WorktreeUsage {
         val canonical = fs.canonicalPath(worktreePath)
         return sources.fold(WorktreeUsage.NONE) { total, source -> total.merge(source.read(canonical)) }
+    }
+
+    /** Whether [tool] has ever run in [worktreePath] — what decides resume against a fresh start. */
+    fun hasSessions(worktreePath: String, tool: AgentTool): Boolean {
+        val canonical = fs.canonicalPath(worktreePath)
+        return sources.any { it.tool == tool && it.hasSessions(canonical) }
     }
 
     /** Forgets every file position, so a closed worktree's state is not kept for the session. */

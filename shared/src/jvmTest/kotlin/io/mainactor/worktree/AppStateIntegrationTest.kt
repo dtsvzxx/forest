@@ -2,13 +2,16 @@ package io.mainactor.worktree
 
 import io.mainactor.worktree.git.Git
 import io.mainactor.worktree.model.Branch
+import io.mainactor.worktree.model.AgentSpec
 import io.mainactor.worktree.model.Project
+import io.mainactor.worktree.model.ProjectAgents
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.model.ConflictSegment
 import io.mainactor.worktree.model.RepoOperation
 import io.mainactor.worktree.model.Resolution
 import io.mainactor.worktree.platform.DesktopSystemIntegration
 import io.mainactor.worktree.platform.DirectoryChooser
+import io.mainactor.worktree.usage.ClaudeUsageSource
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
 import io.mainactor.worktree.platform.ProcessCommandRunner
@@ -194,6 +197,73 @@ class AppStateIntegrationTest {
         assertNull(state.searchFile)
         assertTrue(state.fileCommits.isEmpty())
         assertNull(state.fileDiff)
+    }
+
+    @Test
+    fun `an agent resumes when the worktree already has a session, and starts fresh when it does not`() =
+        runBlocking {
+            if (!gitAvailable) return@runBlocking
+            val state = newState()
+            state.openProject(mainRepo.path).join()
+            val worktree = state.worktrees.single()
+            val claude = state.availableAgents.single { it.id == "claude" }
+
+            state.startAgentFor(worktree, claude)?.join()
+            assertEquals("claude", state.agents.single().command, "nothing to resume yet")
+
+            // One transcript is enough: what decides is whether the tool has ever run here, not
+            // whether any of those sessions spent a token.
+            val transcripts = File(
+                homeDir,
+                ".claude/projects/" + ClaudeUsageSource.encodeProjectDir(File(worktree.path).canonicalPath),
+            ).apply { mkdirs() }
+            File(transcripts, "session.jsonl").writeText("{}\n")
+
+            state.startAgentFor(worktree, claude)?.join()
+
+            assertEquals("claude --continue", state.agents.last().command)
+        }
+
+    @Test
+    fun `a plain shell pane runs no command at all`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val shell = state.availableAgents.single { it.id == "shell" }
+
+        state.startAgentFor(state.worktrees.single(), shell)?.join()
+
+        // Null rather than an empty string: the terminal layer reads it as "just a login shell",
+        // which is what every pane was before agents could be chosen.
+        assertNull(state.agents.single().command)
+    }
+
+    @Test
+    fun `a project's agent settings are saved and reloaded`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val custom = AgentSpec(
+            id = "custom-aider",
+            name = "Aider",
+            command = "aider",
+            builtIn = false,
+        )
+
+        state.saveProjectAgents(
+            ProjectAgents(
+                enabled = setOf("codex", "custom-aider"),
+                custom = listOf(custom),
+            ),
+        )
+        state.usageRefresh?.join()
+
+        val reopened = newState()
+        reopened.openProject(mainRepo.path).join()
+
+        assertEquals(listOf("Codex", "Aider"), reopened.availableAgents.map { it.name })
+        // Turning a built-in off has to survive the round trip, not be re-added by the defaults.
+        assertTrue(reopened.availableAgents.none { it.id == "claude" })
     }
 
     @Test
@@ -738,7 +808,7 @@ class AppStateIntegrationTest {
         val path = File(root, "side").path
         state.createWorktree(path, "side", null, "main", force = false).join()
         val side = state.worktrees.single { it.branch == "side" }
-        state.startAgentFor(side)
+        state.startAgentFor(side)?.join()
         // Look somewhere else first, so the assertion cannot pass by accident.
         state.selectWorktree(state.worktrees.single { it.isMain }).join()
 
@@ -785,14 +855,14 @@ class AppStateIntegrationTest {
 
         assertEquals(0, state.agentCountFor(side))
 
-        state.startAgentFor(side)
+        state.startAgentFor(side)?.join()
 
         assertEquals(AppMode.AGENTS, state.mode, "starting an agent should show the wall")
         assertEquals(1, state.agentCountFor(side))
         assertEquals(side.path, state.focusedAgentSession?.workDir)
 
         // Work elsewhere, then come back to the worktree's agent from its menu.
-        state.startAgentFor(main)
+        state.startAgentFor(main)?.join()
         assertEquals(main.path, state.focusedAgentSession?.workDir)
 
         state.focusAgentFor(side)
@@ -809,8 +879,8 @@ class AppStateIntegrationTest {
         val side = state.worktrees.single { it.branch == "side" }
         val main = state.worktrees.single { it.isMain }
 
-        state.startAgentFor(side)
-        state.startAgentFor(main)
+        state.startAgentFor(side)?.join()
+        state.startAgentFor(main)?.join()
         state.toggleAgentZoom(state.focusedAgentSession!!.id)
         assertEquals(main.path, state.agents.first { it.id == state.zoomedAgent }.workDir)
 

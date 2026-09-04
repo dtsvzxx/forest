@@ -45,6 +45,7 @@ import io.mainactor.worktree.ui.theme.LocalWorktreeColors
 fun ProjectsPane(
     state: AppState,
     onClone: () -> Unit,
+    onConfigureAgents: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorktreeColors.current
@@ -86,6 +87,7 @@ fun ProjectsPane(
                         worktreeCount = if (state.project?.path == project.path) state.worktrees.size else null,
                         onClick = { state.openProject(project.path) },
                         onForget = { state.forgetProject(project.path) },
+                        onConfigureAgents = onConfigureAgents,
                     )
                 }
             }
@@ -105,6 +107,7 @@ private fun ProjectRow(
     worktreeCount: Int?,
     onClick: () -> Unit,
     onForget: () -> Unit,
+    onConfigureAgents: () -> Unit,
 ) {
     val colors = LocalWorktreeColors.current
     // The path used to be a second line on every row. It is long, nearly identical between
@@ -113,6 +116,7 @@ private fun ProjectRow(
         items = {
             listOf(
                 ContextMenuItem("Open") { onClick() },
+                ContextMenuItem("Agents…") { onClick(); onConfigureAgents() },
                 ContextMenuItem(state.system.revealLabel) { state.system.reveal(project.path) },
                 ContextMenuItem("Copy path") { state.system.copyToClipboard(project.path) },
                 ContextMenuItem("Remove from list") { onForget() },

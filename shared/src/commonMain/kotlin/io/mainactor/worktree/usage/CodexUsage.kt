@@ -115,33 +115,62 @@ class CodexRollout(private val path: String) {
  */
 class CodexUsageSource(private val fs: FileSystemAccess) : UsageSource {
 
+    override val tool = AgentTool.CODEX
+
     private val rollouts = HashMap<String, CodexRollout>()
-    private val skip = HashSet<String>()
+
+    /** File to the directory it was started in. Cached because a rollout's directory never moves. */
+    private val cwds = HashMap<String, String>()
 
     override fun read(worktreePath: String): WorktreeUsage {
-        val root = fs.resolve(fs.homeDir(), SESSIONS_DIR)
-        if (!fs.isDirectory(root)) return WorktreeUsage.NONE
-
         var total = WorktreeUsage.NONE
-        rolloutFiles(root).forEach { file ->
-            if (file in skip) return@forEach
+        ours(worktreePath).forEach { file ->
             val rollout = rollouts.getOrPut(file) { CodexRollout(file) }
-            // First poll reads the whole file; the cwd arrives with its first line.
             rollout.poll(fs)
-            val cwd = rollout.cwd
-            when {
-                cwd == null -> Unit
-                cwd == worktreePath || cwd.startsWith("$worktreePath/") -> total = total.merge(rollout.usage)
-                // Belongs to some other directory; never look at it again this session.
-                else -> { skip += file; rollouts.remove(file) }
-            }
+            total = total.merge(rollout.usage)
         }
         return total
     }
 
+    override fun hasSessions(worktreePath: String): Boolean = ours(worktreePath).isNotEmpty()
+
     override fun forgetAll() {
         rollouts.clear()
-        skip.clear()
+        cwds.clear()
+    }
+
+    /**
+     * The rollouts belonging to [worktree].
+     *
+     * The directory is decided from the file's *first line* before anything else is read. Doing it
+     * the other way round — poll, then look at the cwd the poll happened to load — meant reading
+     * every rollout on the machine in full to find the handful that matter, which here is 733 MB
+     * for a few megabytes of answer.
+     *
+     * Membership is worked out per call rather than remembered, because one reader serves every
+     * worktree on the wall: a file that belongs to none of them today belongs to one of them the
+     * moment that worktree gets a pane.
+     */
+    private fun ours(worktree: String): List<String> {
+        val root = fs.resolve(fs.homeDir(), SESSIONS_DIR)
+        if (!fs.isDirectory(root)) return emptyList()
+        return rolloutFiles(root).filter { file ->
+            val cwd = cwdOf(file)
+            cwd == worktree || cwd?.startsWith("$worktree/") == true
+        }
+    }
+
+    private fun cwdOf(file: String): String? {
+        cwds[file]?.let { return it }
+        val head = fs.readFrom(file, 0, META_PROBE_BYTES).decodeToString()
+        val line = head.lineSequence().firstOrNull() ?: return null
+        val cwd = runCatching {
+            val root = json.parseToJsonElement(line).jsonObject
+            if (root["type"]?.jsonPrimitive?.content != SESSION_META) return null
+            root["payload"]?.jsonObject?.get("cwd")?.jsonPrimitive?.content
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        cwds[file] = cwd
+        return cwd
     }
 
     /** `sessions/<year>/<month>/<day>/rollout-*.jsonl`, the layout Codex writes. */
@@ -159,8 +188,14 @@ class CodexUsageSource(private val fs: FileSystemAccess) : UsageSource {
             }
         }
 
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
     private companion object {
         const val SESSIONS_DIR = ".codex/sessions"
         const val ROLLOUT_PREFIX = "rollout-"
+        const val SESSION_META = "session_meta"
+
+        /** Comfortably past the longest `session_meta` line on this machine, which is 27 KB. */
+        const val META_PROBE_BYTES = 128 * 1024
     }
 }

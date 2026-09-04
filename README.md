@@ -59,8 +59,17 @@ agent's worktree in the Project view, loading its repository first when the pane
 is not currently open.
 
 Nothing starts a shell on its own: opening a repository does not open a terminal, and entering the
-agent wall does not start an agent. A worktree's context menu offers **Start agent here**, or
-**Focus agent** when one is already running in it.
+agent wall does not start an agent. A worktree's context menu offers **Start Claude Code here**,
+**Start Codex here** — one entry per agent the project offers — or **Focus agent** when one is
+already running in it.
+
+A pane runs the agent you picked, and **picks up where you left off**: if that tool has run in the
+worktree before, the pane opens on its most recent session there rather than an empty one. The agent
+runs inside a login shell and the shell stays when the agent exits, so nothing is lost if it stops.
+
+Right-click a project and choose **Agents…** to say which ones it offers. Claude Code and Codex are
+offered wherever they are installed; you can switch either off, and add commands of your own — those
+just run, with no session to resume and no usage to read.
 
 **Every** way of adding a pane — the split buttons, the shortcuts, the `+` — asks which repository
 and which worktree it runs in, because agents are commonly spread across several repositories and a

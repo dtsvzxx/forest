@@ -24,7 +24,7 @@ fun EmbeddedTerminal(
     modifier: Modifier = Modifier,
 ) {
     val handle = remember(session.id) {
-        manager.getOrCreate(session.id, session.workDir, session.title)
+        manager.getOrCreate(session.id, session.workDir, session.title, session.command)
     }
 
     // Selecting a pane anywhere else — its header, a shortcut — has to move the caret too, or the

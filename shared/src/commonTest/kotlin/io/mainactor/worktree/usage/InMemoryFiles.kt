@@ -55,6 +55,7 @@ internal class InMemoryFiles : FileSystemAccess {
     override fun parentOf(path: String): String? = path.substringBeforeLast('/').ifEmpty { null }
     override fun resolve(base: String, child: String) = "$base/$child"
     override fun canonicalPath(path: String) = path
+    override fun findOnPath(name: String): String? = null
     override fun lastModifiedAt(path: String) = 0L
     override fun now() = 0L
 }

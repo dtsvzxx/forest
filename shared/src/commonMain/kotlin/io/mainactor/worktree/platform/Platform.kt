@@ -50,6 +50,16 @@ interface FileSystemAccess {
     /** Entry names directly inside [path]; empty when it is missing or unreadable. */
     fun listDirectory(path: String): List<String>
 
+    /**
+     * The absolute path of an executable named [name], or null when it is not found.
+     *
+     * A best effort, not a verdict: a windowed app started from Finder inherits a minimal `PATH`
+     * that does not include Homebrew or a version manager's shims, so a tool the user's shell finds
+     * easily can be invisible here. Agents run inside a *login* shell, which will find it anyway —
+     * so this only decides what to tick by default, never what the user is allowed to run.
+     */
+    fun findOnPath(name: String): String?
+
     /** Size in bytes, or 0 when the path does not exist. */
     fun fileSize(path: String): Long
 

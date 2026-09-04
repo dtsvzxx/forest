@@ -98,6 +98,21 @@ class JvmFileSystemAccess(
 
     override fun lastModifiedAt(path: String): Long = File(path).lastModified() / 1000
 
+    override fun findOnPath(name: String): String? {
+        val names = if (Os.isWindows) listOf("$name.exe", "$name.cmd", name) else listOf(name)
+        System.getenv("PATH")?.split(File.pathSeparatorChar)?.forEach { dir ->
+            names.forEach { candidate ->
+                val file = File(dir, candidate)
+                if (file.isFile && file.canExecute()) return file.absolutePath
+            }
+        }
+        // Where a windowed process's PATH typically fails to reach.
+        return EXTRA_BIN_DIRS
+            .map { File(it, name) }
+            .firstOrNull { it.isFile && it.canExecute() }
+            ?.absolutePath
+    }
+
     override fun listDirectory(path: String): List<String> =
         File(path).list()?.toList().orEmpty()
 
@@ -123,6 +138,23 @@ class JvmFileSystemAccess(
     }
 
     override fun now(): Long = System.currentTimeMillis() / 1000
+
+    private companion object {
+        /**
+         * Directories a windowed process's inherited `PATH` usually misses.
+         *
+         * Same problem [GitLocator] solves for git, and for the same reason: launched from Finder
+         * rather than from a terminal, the JVM gets `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else.
+         */
+        val EXTRA_BIN_DIRS = listOf(
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/opt/local/bin",
+            System.getProperty("user.home") + "/.local/bin",
+            System.getProperty("user.home") + "/.bun/bin",
+            System.getProperty("user.home") + "/bin",
+        )
+    }
 }
 
 /**
@@ -163,6 +195,23 @@ object Os {
     val nullDevice: String = if (isWindows) "NUL" else "/dev/null"
 
     /** Login shell for the embedded terminal. */
+    /**
+     * A login shell that runs [command] first and then hands the pane back to the user.
+     *
+     * `exec` at the end rather than letting the `-c` shell exit: when an agent quits — or crashes
+     * on its first run — the pane would otherwise vanish along with whatever it printed about why.
+     * The command is separated with `;` and not `&&` for the same reason.
+     *
+     * A login shell is what gives the agent the user's own `PATH`, aliases and credential helpers,
+     * which is the whole reason a pane has ever run one.
+     */
+    fun shellRunning(command: String?): List<String> {
+        if (command.isNullOrBlank()) return defaultShell()
+        if (isWindows) return listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/k", command)
+        val shell = System.getenv("SHELL") ?: "/bin/bash"
+        return listOf(shell, "-l", "-c", "$command; exec '$shell' -l")
+    }
+
     fun defaultShell(): List<String> = when {
         isWindows -> listOf(System.getenv("COMSPEC") ?: "cmd.exe")
         else -> {

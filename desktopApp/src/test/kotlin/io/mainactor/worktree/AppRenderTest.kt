@@ -134,6 +134,39 @@ class AppRenderTest {
     }
 
     @Test
+    fun `renders the project's agent settings`() {
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            WorktreeTheme {
+                Box(Modifier.fillMaxSize().background(LocalWorktreeColors.current.editor)) {
+                    io.mainactor.worktree.ui.dialogs.AgentSettingsDialog(
+                        projectName = "repo",
+                        agents = io.mainactor.worktree.model.ProjectAgents(
+                            enabled = setOf("claude", "shell", "custom-aider"),
+                            custom = listOf(
+                                io.mainactor.worktree.model.AgentSpec(
+                                    id = "custom-aider",
+                                    name = "Aider",
+                                    command = "aider --model sonnet",
+                                    builtIn = false,
+                                ),
+                            ),
+                        ),
+                        // Codex reads as missing here, which is the case worth looking at: it is
+                        // still listed and still tickable.
+                        isInstalled = { it.id != "codex" },
+                        onDismiss = {},
+                        onConfirm = {},
+                    )
+                }
+            }
+        }
+        val image = try { scene.render(); scene.render() } finally { scene.close() }
+        val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes
+        assertTrue(png != null && png.isNotEmpty())
+        File("build/reports/app-render-agent-settings.png").apply { parentFile?.mkdirs() }.writeBytes(png)
+    }
+
+    @Test
     fun `hovering a toolbar button shows its tooltip`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
@@ -594,6 +627,8 @@ class AppRenderTest {
                         projects = listOf(Project("/repo", "repo"), Project("/other", "other-app")),
                         initialProject = Project("/repo", "repo"),
                         initialWorktreePath = "/repo",
+                        agents = io.mainactor.worktree.model.BuiltInAgents.all,
+                        initialAgentId = null,
                         loadWorktrees = { _, onLoaded ->
                             // Ordered and dated the way AppState hands them over.
                             onLoaded(
@@ -618,7 +653,7 @@ class AppRenderTest {
                             )
                         },
                         onDismiss = {},
-                        onConfirm = { _, _ -> },
+                        onConfirm = { _, _, _ -> },
                     )
                 }
             }
@@ -651,6 +686,8 @@ class AppRenderTest {
                         projects = listOf(Project("/repo", "repo")),
                         initialProject = Project("/repo", "repo"),
                         initialWorktreePath = initialWorktreePath,
+                        agents = io.mainactor.worktree.model.BuiltInAgents.all,
+                        initialAgentId = null,
                         loadWorktrees = { _, onLoaded ->
                             onLoaded(
                                 listOf(
@@ -661,7 +698,7 @@ class AppRenderTest {
                             )
                         },
                         onDismiss = {},
-                        onConfirm = { _, _ -> },
+                        onConfirm = { _, _, _ -> },
                     )
                 }
             }
@@ -955,6 +992,10 @@ private class FakeFileSystem(private val conflicted: Boolean = false) : FileSyst
     override fun parentOf(path: String) = path.substringBeforeLast('/').ifEmpty { null }
     override fun resolve(base: String, child: String) = "$base/$child"
     override fun canonicalPath(path: String) = path
+
+    // Nothing is installed as far as the render tests are concerned; the dialogs list the
+    // built-ins anyway and say so.
+    override fun findOnPath(name: String): String? = null
 
     // Enough of a ~/.claude/projects tree for the agent wall to show a usage badge: one project
     // directory for /repo, holding one session with one response in it.

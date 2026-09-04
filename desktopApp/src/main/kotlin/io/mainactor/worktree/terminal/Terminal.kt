@@ -69,13 +69,18 @@ class TerminalSessionManager {
      */
     var onFocusGained: (sessionId: String) -> Unit = {}
 
-    fun getOrCreate(id: String, workDir: String, title: String): TerminalSessionHandle {
+    fun getOrCreate(
+        id: String,
+        workDir: String,
+        title: String,
+        command: String? = null,
+    ): TerminalSessionHandle {
         sessions[id]?.let { existing ->
             if (existing.isAlive) return existing
             existing.dispose()
             sessions.remove(id)
         }
-        val handle = create(id, workDir, title)
+        val handle = create(id, workDir, title, command)
         sessions[id] = handle
         return handle
     }
@@ -89,7 +94,12 @@ class TerminalSessionManager {
         sessions.clear()
     }
 
-    private fun create(id: String, workDir: String, title: String): TerminalSessionHandle {
+    private fun create(
+        id: String,
+        workDir: String,
+        title: String,
+        command: String?,
+    ): TerminalSessionHandle {
         val env = HashMap(System.getenv())
         // Tell the shell it is talking to a capable terminal, and keep pagers from taking over.
         env["TERM"] = "xterm-256color"
@@ -97,7 +107,7 @@ class TerminalSessionManager {
         if (Os.isMac) env["LANG"] = env["LANG"] ?: "en_US.UTF-8"
 
         val process = PtyProcessBuilder()
-            .setCommand(Os.defaultShell().toTypedArray())
+            .setCommand(Os.shellRunning(command).toTypedArray())
             .setEnvironment(env)
             .setDirectory(workDir)
             .setInitialColumns(120)

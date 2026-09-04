@@ -37,6 +37,7 @@ import io.mainactor.worktree.ui.components.VerticalSplitter
 import io.mainactor.worktree.ui.dialogs.CloneDialog
 import io.mainactor.worktree.ui.dialogs.CommitDialog
 import io.mainactor.worktree.ui.dialogs.MergeDialog
+import io.mainactor.worktree.ui.dialogs.AgentSettingsDialog
 import io.mainactor.worktree.ui.dialogs.NewAgentDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.RebaseDialog
@@ -63,6 +64,7 @@ private sealed interface Dialog {
     data class RemoveWorktree(val worktree: Worktree) : Dialog
     data class SwitchBranch(val worktree: Worktree) : Dialog
     data class NewAgent(val axis: SplitAxis?) : Dialog
+    data object AgentSettings : Dialog
 }
 
 /**
@@ -148,6 +150,7 @@ fun App(
                     ProjectsPane(
                         state = state,
                         onClone = { dialog = Dialog.Clone },
+                        onConfigureAgents = { dialog = Dialog.AgentSettings },
                         modifier = Modifier.width(projectsWidth * squeeze),
                     )
                     VerticalSplitter(
@@ -383,14 +386,29 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
                     ?: state.project,
                 initialWorktreePath = focused?.workDir
                     ?: (state.agentWorktree ?: state.selectedWorktree)?.path,
+                agents = state.availableAgents,
+                // Splitting a pane keeps its agent by default: the reason to split is usually more
+                // of the same, and the other agents are one click away.
+                initialAgentId = focused?.agentId,
                 loadWorktrees = state::worktreesOf,
                 onDismiss = onDismiss,
-                onConfirm = { project, worktree ->
+                onConfirm = { project, worktree, agent ->
                     onDismiss()
-                    state.openAgent(worktree, dialog.axis, project.path)
+                    state.openAgent(worktree, dialog.axis, project.path, agent)
                 },
             )
         }
+
+        Dialog.AgentSettings -> AgentSettingsDialog(
+            projectName = state.project?.name.orEmpty(),
+            agents = state.projectAgents,
+            isInstalled = state::isAgentInstalled,
+            onDismiss = onDismiss,
+            onConfirm = { agents ->
+                onDismiss()
+                state.saveProjectAgents(agents)
+            },
+        )
 
         is Dialog.SwitchBranch -> SwitchBranchDialog(
             worktreeFolder = dialog.worktree.name,

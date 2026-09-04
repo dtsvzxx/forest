@@ -294,6 +294,37 @@ Four constraints worth remembering:
 Dependencies: JediTerm and pty4j come from the JetBrains repository declared in
 `settings.gradle.kts`, not Maven Central. **JediTerm is LGPL 3.0** and is linked unmodified.
 
+## Agents a pane can run
+
+A pane used to be a login shell and nothing else. It now runs whatever agent was chosen for it, and
+`model/AgentSpec.kt` is the whole vocabulary: a name, a command line, and — for the two CLIs Forest
+understands — the command that *continues* the worktree's most recent session.
+
+**Resume needs no session id.** `claude --continue` and `codex resume --last` both mean "the most
+recent session in this working directory", which is exactly the worktree the pane runs in (`codex
+resume` filters by cwd unless given `--all`). Whether there is anything to resume is asked before
+running rather than discovered by a command that fails: `UsageReader.hasSessions` already knows,
+because Forest reads both tools' session logs for the usage badge. That check is deliberately
+separate from `read` — it must not depend on any of those sessions having spent a token.
+
+`Os.shellRunning` builds `$SHELL -l -c "<command>; exec '$SHELL' -l"`. The login shell is what gives
+an agent the user's own `PATH`, aliases and credential helpers; the trailing `exec` is what keeps
+the pane alive — and keeps whatever the agent printed on its way out — when it exits or fails to
+start. `;` rather than `&&` for the same reason.
+
+`openAgent` stays **synchronous unless a resume probe is actually needed**, which is why a hotkey
+still opens a pane instantly and why the existing tests did not all have to learn to `join()`. Only
+a resumable agent defers, and it returns the `Job` like every other action here.
+
+Per-project settings live in `~/.worktree/agents.json` — JSON rather than the line-per-entry format
+the other two files use, because it is a map of projects to a set and a list of records. A project
+nobody has configured offers every built-in whose executable `FileSystemAccess.findOnPath` can find,
+so the dialog exists to take something away or add a command, not to switch the feature on.
+**Detection is a best effort and never a gate**: a windowed app inherits a minimal `PATH` that misses
+Homebrew and version-manager shims, so the dialog lists every built-in whatever it finds and says
+"not found on PATH" beside the ones it did not. The agent runs in a login shell, which will find
+them anyway.
+
 ## Usage statistics
 
 Each agent pane's header shows what the agent CLIs have spent in that pane's worktree — tokens and

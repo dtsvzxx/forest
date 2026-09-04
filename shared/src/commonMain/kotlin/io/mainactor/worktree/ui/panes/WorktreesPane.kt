@@ -225,7 +225,21 @@ private fun WorktreeRow(
                             ) { state.focusAgentFor(worktree) },
                         )
                     }
-                    add(ContextMenuItem("Start agent here") { state.startAgentFor(worktree) })
+                    // One entry per agent the project offers, because a submenu is not something
+                    // Compose Desktop's context menu has and a picker for two items is a click too
+                    // many for the thing you do most.
+                    val agents = state.availableAgents
+                    if (agents.isEmpty()) {
+                        add(ContextMenuItem("Start agent here") { state.startAgentFor(worktree) })
+                    } else {
+                        agents.forEach { agent ->
+                            add(
+                                ContextMenuItem("Start ${agent.name} here") {
+                                    state.startAgentFor(worktree, agent)
+                                },
+                            )
+                        }
+                    }
                     add(ContextMenuItem("Switch branch…", onSwitchBranch))
                 }
                 add(ContextMenuItem("Open terminal here") { state.openTerminal(worktree) })

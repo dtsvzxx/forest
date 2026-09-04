@@ -38,6 +38,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.mainactor.worktree.model.Branch
+import io.mainactor.worktree.ui.components.ToolButton
+import io.mainactor.worktree.model.AgentSpec
+import io.mainactor.worktree.model.BuiltInAgents
+import io.mainactor.worktree.model.ProjectAgents
 import io.mainactor.worktree.model.Project
 import io.mainactor.worktree.model.Worktree
 import io.mainactor.worktree.ui.components.Badge
@@ -527,12 +531,17 @@ fun NewAgentDialog(
     projects: List<Project>,
     initialProject: Project?,
     initialWorktreePath: String?,
+    agents: List<AgentSpec>,
+    initialAgentId: String?,
     loadWorktrees: (Project, onLoaded: (List<Worktree>) -> Unit) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (Project, Worktree) -> Unit,
+    onConfirm: (Project, Worktree, AgentSpec?) -> Unit,
 ) {
     val colors = LocalWorktreeColors.current
     var project by remember { mutableStateOf(initialProject ?: projects.firstOrNull()) }
+    var agent by remember {
+        mutableStateOf(agents.firstOrNull { it.id == initialAgentId } ?: agents.firstOrNull())
+    }
     var worktrees by remember { mutableStateOf<List<Worktree>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var selectedPath by remember { mutableStateOf(initialWorktreePath.orEmpty()) }
@@ -559,13 +568,19 @@ fun NewAgentDialog(
             IdeButton("Cancel", onDismiss)
             IdeButton(
                 text = "Start",
-                onClick = { project?.let { p -> chosen?.let { onConfirm(p, it) } } },
+                onClick = { project?.let { p -> chosen?.let { onConfirm(p, it, agent) } } },
                 enabled = chosen != null && project != null,
                 primary = chosen != null && project != null,
             )
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (agents.size > 1) {
+                Field("Agent") {
+                    AgentChips(agents = agents, selected = agent, onSelect = { agent = it })
+                }
+            }
+
             Field("Project") {
                 ProjectPicker(projects = projects, selected = project, onSelect = { project = it })
             }
@@ -905,6 +920,210 @@ fun CloneDialog(
                 "Credentials come from your git credential helper or SSH agent; this app never prompts for them.",
                 color = colors.textDisabled,
                 fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+/**
+ * The agents on offer, as chips rather than a dropdown.
+ *
+ * There are only ever a handful, and which ones a project offers is itself a setting — showing them
+ * all is the difference between "pick from what this project has" and "go and find out what it has".
+ */
+@Composable
+private fun AgentChips(agents: List<AgentSpec>, selected: AgentSpec?, onSelect: (AgentSpec) -> Unit) {
+    val colors = LocalWorktreeColors.current
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        agents.forEach { spec ->
+            val active = spec.id == selected?.id
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(Dimens.arc))
+                    .background(if (active) colors.selection else colors.panelAlt)
+                    .clickable { onSelect(spec) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text = spec.name,
+                    color = if (active) colors.text else colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Which agents a project offers, and any commands the user has added to it.
+ *
+ * The built-ins are always listed, whether or not their executable could be found: detection reads
+ * a `PATH` that a windowed app does not fully inherit, so hiding a tool on that basis would hide
+ * one the user can run perfectly well. It is said out loud instead, and the tick is theirs.
+ */
+@Composable
+fun AgentSettingsDialog(
+    projectName: String,
+    agents: ProjectAgents,
+    isInstalled: (AgentSpec) -> Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (ProjectAgents) -> Unit,
+) {
+    val colors = LocalWorktreeColors.current
+    var enabled by remember { mutableStateOf(agents.enabled) }
+    var custom by remember { mutableStateOf(agents.custom) }
+    var newName by remember { mutableStateOf("") }
+    var newCommand by remember { mutableStateOf("") }
+
+    fun toggle(id: String) {
+        enabled = if (id in enabled) enabled - id else enabled + id
+    }
+
+    Modal(
+        title = "Agents in $projectName",
+        onDismiss = onDismiss,
+        width = 520.dp,
+        footer = {
+            IdeButton("Cancel", onDismiss)
+            IdeButton(
+                text = "Save",
+                onClick = { onConfirm(ProjectAgents(enabled = enabled, custom = custom)) },
+                primary = true,
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Field("Built in") {
+                Column {
+                    BuiltInAgents.all.forEach { spec ->
+                        AgentToggleRow(
+                            name = spec.name,
+                            detail = when {
+                                spec.isShell -> "A plain login shell, no agent"
+                                !isInstalled(spec) -> "${spec.command} — not found on PATH"
+                                spec.resumeCommand != null -> "${spec.resumeCommand} when the worktree has a session"
+                                else -> spec.command
+                            },
+                            checked = spec.id in enabled,
+                            onToggle = { toggle(spec.id) },
+                        )
+                    }
+                }
+            }
+
+            if (custom.isNotEmpty()) {
+                Field("Your commands") {
+                    Column {
+                        custom.forEach { spec ->
+                            AgentToggleRow(
+                                name = spec.name,
+                                detail = spec.command,
+                                checked = spec.id in enabled,
+                                onToggle = { toggle(spec.id) },
+                                onRemove = {
+                                    custom = custom - spec
+                                    enabled = enabled - spec.id
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Field("Add a command") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    IdeTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        placeholder = "Name",
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.width(140.dp),
+                    )
+                    IdeTextField(
+                        value = newCommand,
+                        onValueChange = { newCommand = it },
+                        placeholder = "Command to run in the worktree",
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IdeButton(
+                        text = "Add",
+                        enabled = newName.isNotBlank() && newCommand.isNotBlank(),
+                        onClick = {
+                            val id = "custom-${newName.trim().lowercase().replace(' ', '-')}"
+                            custom = custom + AgentSpec(
+                                id = id,
+                                name = newName.trim(),
+                                command = newCommand.trim(),
+                                builtIn = false,
+                            )
+                            enabled = enabled + id
+                            newName = ""
+                            newCommand = ""
+                        },
+                    )
+                }
+            }
+
+            Text(
+                text = "A pane runs its agent in a login shell and keeps the shell when the agent " +
+                    "exits, so nothing is lost if it stops.",
+                color = colors.textDisabled,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AgentToggleRow(
+    name: String,
+    detail: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+) {
+    val colors = LocalWorktreeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .clip(RoundedCornerShape(Dimens.selectionArc))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .size(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(if (checked) colors.accent else colors.panelAlt)
+                .border(1.dp, colors.controlBorder, RoundedCornerShape(3.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) IdeIcon(IconKind.CHECK, Color.White, size = 10.dp)
+        }
+        Text(name, color = colors.text, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        Text(
+            text = detail,
+            color = colors.textDisabled,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (onRemove != null) {
+            ToolButton(
+                icon = IconKind.CLOSE,
+                tooltip = "Remove this command",
+                onClick = onRemove,
+                modifier = Modifier.size(18.dp),
+                tint = colors.textDim,
             )
         }
     }
