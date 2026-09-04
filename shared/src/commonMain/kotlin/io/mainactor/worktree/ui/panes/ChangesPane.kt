@@ -304,7 +304,7 @@ private fun RangeFileList(state: AppState) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             item { SectionHeader("Changed vs ${state.baseRef}", diffs.size, LocalWorktreeColors.current.modified) }
             items(diffs, key = { it.path }) { fileDiff ->
-                RangeFileRow(fileDiff, state.diff?.path == fileDiff.path) { state.selectRangeFile(fileDiff) }
+                FileDiffRow(fileDiff, state.diff?.path == fileDiff.path) { state.selectRangeFile(fileDiff) }
             }
         }
         VerticalScrollbar(
@@ -315,7 +315,7 @@ private fun RangeFileList(state: AppState) {
 }
 
 @Composable
-private fun SectionHeader(title: String, count: Int, color: Color) {
+internal fun SectionHeader(title: String, count: Int, color: Color) {
     val colors = LocalWorktreeColors.current
     Row(
         modifier = Modifier.fillMaxWidth().height(26.dp).padding(start = 12.dp, end = 8.dp),
@@ -370,8 +370,9 @@ private fun FileRow(file: ChangedFile, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** One row of a list of [FileDiff]s — the range comparison and the Log tab's commit both use it. */
 @Composable
-private fun RangeFileRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit) {
+internal fun FileDiffRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalWorktreeColors.current
     val badge = when {
         diff.isNew -> "A"
@@ -412,7 +413,7 @@ private fun RangeFileRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit)
 }
 
 @Composable
-private fun DiffHeader(diff: FileDiff) {
+internal fun DiffHeader(diff: FileDiff) {
     val colors = LocalWorktreeColors.current
     Row(
         modifier = Modifier

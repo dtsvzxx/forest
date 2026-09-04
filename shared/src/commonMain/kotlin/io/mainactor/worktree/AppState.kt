@@ -136,6 +136,23 @@ class AppState(
     var rangeDiffs by mutableStateOf<List<FileDiff>>(emptyList())
         private set
 
+    // ---------------------------------------------------------------------- log
+
+    /** The commit the Log tab is showing the contents of. */
+    var selectedCommit by mutableStateOf<CommitInfo?>(null)
+        private set
+
+    /** Every file [selectedCommit] touched, each already carrying its patch. */
+    var commitFiles by mutableStateOf<List<FileDiff>>(emptyList())
+        private set
+
+    /** The file selected within [selectedCommit]. */
+    var commitFile by mutableStateOf<FileDiff?>(null)
+        private set
+
+    var commitDiffLoading by mutableStateOf(false)
+        private set
+
     // ---------------------------------------------------------------- conflicts
 
     var conflictFile by mutableStateOf<ConflictedFile?>(null)
@@ -364,6 +381,10 @@ class AppState(
             commits = commitsAsync.await()
         }
 
+        // A refresh must not drop what the Log tab is reading, but a commit that was amended or
+        // rebased away is no longer there to show.
+        if (commits.none { it.hash == selectedCommit?.hash }) clearCommitSelection()
+
         if (baseRef == null) baseRef = defaultBaseRef()
 
         if (status.operation != RepoOperation.NONE && status.conflicts.isNotEmpty()) {
@@ -458,6 +479,7 @@ class AppState(
         selectedFile = null
         diff = null
         conflictFile = null
+        clearCommitSelection()
         loadWorktree(worktree)
     }
 
@@ -493,6 +515,37 @@ class AppState(
         selectedFile = null
         conflictFile = null
         diff = fileDiff
+    }
+
+    /**
+     * Loads what a commit changed.
+     *
+     * Nothing does this on its own. It is a `git show` per commit, and the Log tab is opened to
+     * scan subjects far more often than to read a patch — the same reason no shell starts by
+     * itself. The first file is selected once the patch is in hand, because by then the cost is
+     * already paid and an empty diff pane beside a full file list is just another click.
+     */
+    fun selectCommit(commit: CommitInfo) = run(null) {
+        val dir = selectedWorktree?.path ?: return@run
+        selectedCommit = commit
+        commitFile = null
+        commitDiffLoading = true
+        commitFiles = try {
+            git.commitDiff(dir, commit.hash)
+        } finally {
+            commitDiffLoading = false
+        }
+        commitFile = commitFiles.firstOrNull()
+    }
+
+    fun selectCommitFile(file: FileDiff) {
+        commitFile = file
+    }
+
+    private fun clearCommitSelection() {
+        selectedCommit = null
+        commitFiles = emptyList()
+        commitFile = null
     }
 
     fun setDiffMode(mode: DiffMode) = run(null) {

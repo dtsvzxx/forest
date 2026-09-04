@@ -59,6 +59,60 @@ class GitIntegrationTest {
     }
 
     @Test
+    fun `a commit's patch covers merges and the very first commit`() {
+        if (!gitAvailable) return
+        runBlocking {
+            // A merge commit is the case worth pinning: `git show` prints an empty diff for one
+            // unless it is asked for the first-parent view, and a log of a shared repository is
+            // mostly merges.
+            git.run(main.path, "checkout", "--quiet", "-b", "side")
+            write("added-on-side.txt", "side\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "work on the side branch")
+            git.run(main.path, "checkout", "--quiet", "main")
+            write("file.txt", "line1\nchanged\nline3\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "work on main")
+            val merged = git.run(main.path, "merge", "--no-ff", "-m", "Merge branch 'side'", "side")
+            assertTrue(merged.ok, merged.message)
+
+            val log = git.log(main.path)
+            val merge = log.first { it.subject.startsWith("Merge branch") }
+            val first = log.last()
+
+            val mergeFiles = git.commitDiff(main.path, merge.hash)
+            assertEquals(
+                listOf("added-on-side.txt"),
+                mergeFiles.map { it.path },
+                "a merge must show what it brought over its first parent",
+            )
+            assertTrue(mergeFiles.single().isNew)
+
+            // The root commit has no parent to diff against; git renders it as an added tree.
+            val rootFiles = git.commitDiff(main.path, first.hash)
+            assertEquals(listOf("file.txt"), rootFiles.map { it.path })
+            assertEquals(3, rootFiles.single().added, "the whole file is an addition")
+        }
+    }
+
+    @Test
+    fun `a commit's patch names every file it touched`() {
+        if (!gitAvailable) return
+        runBlocking {
+            write("file.txt", "line1\nline2 edited\nline3\n")
+            write("second.txt", "new file\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "touch two files")
+
+            val files = git.commitDiff(main.path, git.log(main.path).first().hash)
+
+            assertEquals(listOf("file.txt", "second.txt"), files.map { it.path }.sorted())
+            // The patch comes back with the file list, so the pane needs no second command.
+            assertTrue(files.all { it.hunks.isNotEmpty() }, "each file should carry its own hunks")
+        }
+    }
+
+    @Test
     fun `lists the main worktree and the ones we add`() {
         if (!gitAvailable) return
         runBlocking {

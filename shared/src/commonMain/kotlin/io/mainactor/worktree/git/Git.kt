@@ -248,6 +248,24 @@ class Git(
         return GitParsers.parseDiff(r.stdout).map { it.copy(path = path, isNew = true) }
     }
 
+    /**
+     * The patch one commit introduced, as one child process for the whole commit — the file list
+     * the Log tab shows is [FileDiff.path] of the result, not a second `--name-status` call.
+     *
+     * `-m --first-parent` is the part that matters: without it git prints an *empty* diff for any
+     * commit with two parents, and a repository that merges has a log which is mostly merges. With
+     * it, a merge shows what it brought in, which is what "what changed here" means to the person
+     * reading the list. Root commits need no special case — `show` renders them as an added tree.
+     */
+    suspend fun commitDiff(dir: String, hash: String, contextLines: Int = 3): List<FileDiff> {
+        val r = run(
+            dir,
+            "show", "--format=", "--no-color", "--no-ext-diff", "--find-renames",
+            "-m", "--first-parent", "-U$contextLines", hash,
+        )
+        return if (r.ok) GitParsers.parseDiff(r.stdout) else emptyList()
+    }
+
     /** Diff between two refs, used to show what a worktree's branch carries over its base. */
     suspend fun diffRange(dir: String, from: String, to: String, contextLines: Int = 3): List<FileDiff> {
         val r = run(dir, "diff", "--no-color", "--no-ext-diff", "-U$contextLines", "$from...$to")

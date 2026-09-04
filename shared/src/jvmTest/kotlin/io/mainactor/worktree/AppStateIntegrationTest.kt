@@ -115,6 +115,56 @@ class AppStateIntegrationTest {
     }
 
     @Test
+    fun `selecting a commit loads the files it changed, and only when asked`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+        File(mainRepo, "file.txt").writeText("line1\nedited\nline3\n")
+        File(mainRepo, "extra.txt").writeText("new\n")
+        git.stageAll(mainRepo.path)
+        git.commit(mainRepo.path, "edit one file and add another")
+        val state = newState()
+
+        state.openProject(mainRepo.path).join()
+
+        // Opening a project must not cost a `git show`: the Log tab is opened to scan subjects far
+        // more often than to read a patch.
+        assertNull(state.selectedCommit, "no commit should be loaded until one is clicked")
+        assertTrue(state.commitFiles.isEmpty())
+
+        state.selectCommit(state.commits.first()).join()
+
+        assertEquals(listOf("extra.txt", "file.txt"), state.commitFiles.map { it.path }.sorted())
+        assertFalse(state.commitDiffLoading)
+        // The first file is selected for the user, and arrives with its patch already parsed.
+        assertNotNull(state.commitFile)
+        assertTrue(state.commitFile!!.hunks.isNotEmpty())
+    }
+
+    @Test
+    fun `moving to another worktree drops the commit the log was showing`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "feature").path,
+            newBranch = "feature/x",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        state.selectCommit(state.commits.first()).join()
+        assertNotNull(state.selectedCommit)
+
+        state.selectWorktree(state.worktrees.first { !it.isMain }).join()
+
+        // The commit belonged to the worktree we left; leaving its patch on screen under another
+        // worktree's history is how the pane starts lying.
+        assertNull(state.selectedCommit)
+        assertTrue(state.commitFiles.isEmpty())
+        assertNull(state.commitFile)
+    }
+
+    @Test
     fun `opening a project never reorders the list`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val second = newRepository("other")

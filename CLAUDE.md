@@ -92,6 +92,13 @@ on the interactive path:
 `RefreshCostTest` builds a 40-worktree repository and fails if either budget regresses. Before these
 constraints existed, one refresh spawned 249 child processes and took ~1.5 s.
 
+**A commit's own diff** comes from `Git.commitDiff`, which is `git show --format= -m
+--first-parent`. The `-m --first-parent` pair is the whole point: without it git prints an *empty*
+diff for any commit with two parents, and the log of a shared repository is mostly merges. It is
+one child process for the whole commit — the Log tab's file list is the `path` of each returned
+`FileDiff`, not a second `--name-status` call — and nothing calls it until a commit is clicked,
+because the Log tab is opened to scan subjects far more often than to read a patch.
+
 `GitParsers` holds the pure parsing of git's machine-readable formats and carries the bulk of the
 unit tests. Two things there are easy to break:
 
@@ -156,6 +163,11 @@ and friends) while leaving the stored value alone, so the panes come back when t
 
 Layout traps that have already bitten this code:
 
+- **A column of text sized by a guessed `dp` width will eventually wrap.** The Log tab's hash
+  column was 62.dp against an eight-character monospace hash, which fitted in theory and wrapped in
+  practice; the second line was then clipped by the row height. Where a column is monospace and
+  uniform, pad the *string* to the widest value in the list and let it size itself — that is exact
+  alignment with nothing to measure. Elsewhere, `maxLines = 1` at minimum.
 - **Only ever put one weighted child in a row of flexible text.** Several `weight(1f)` children —
   including a `Spacer(Modifier.weight(1f))` used to push things apart — split the row evenly no
   matter what they contain, so a branch name truncates at half the width with a gap beside it. The
@@ -270,7 +282,10 @@ Dependencies: JediTerm and pty4j come from the JetBrains repository declared in
 `CommandRunner`, asserts it is not a flat fill, and writes four PNGs under
 `desktopApp/build/reports/`: `app-render` (the default state), `app-render-many` (40 worktrees, the
 filtered list), `app-render-conflicts` (a stopped merge, reached by feeding a conflicted status),
-`app-render-agents` (a six-pane wall), `app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
+`app-render-agents` (a six-pane wall), `app-render-log` (a commit open in the Log tab, over a
+history shaped like a real shared repository — long refs, merge subjects and eight-character
+hashes, the size at which the hash column used to wrap onto a second, clipped line),
+`app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
 delay, since `TooltipArea` counts wall-clock time rather than frames) and `app-render-splitter`.
 Two tests drive real pointer press/move/release sequences over the dividers and assert the pane
 boundary moved; they are what caught the frozen splitters. A third renders the same state into two

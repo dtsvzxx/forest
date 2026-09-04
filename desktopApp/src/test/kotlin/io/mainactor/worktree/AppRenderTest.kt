@@ -70,6 +70,31 @@ class AppRenderTest {
     }
 
     @Test
+    fun `the log shows a commit's files and its patch`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.rightTab = RightTab.LOG
+            scene.render()
+            state.selectCommit(state.commits.first())
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-log.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        assertEquals(2, state.commitFiles.size, "the commit's files should have been parsed")
+        assertEquals("src/Orders.kt", state.commitFile?.path, "the first file should be selected")
+    }
+
+    @Test
     fun `hovering a toolbar button shows its tooltip`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
@@ -738,6 +763,7 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             args.startsWith("for-each-ref") -> ok(if ("refs/heads" in command) BRANCHES else "")
             args.startsWith("log", "--no-walk") -> ok(commitTimes)
             args.startsWith("log") -> ok(LOG)
+            args.startsWith("show") -> ok(COMMIT_PATCH)
             args.startsWith("diff") -> ok(DIFF)
             else -> ok("")
         }
@@ -756,7 +782,7 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             "bugfix/ANDROID-2291-crash-on-startup",
         )
 
-        val VERBS = setOf("rev-parse", "status", "for-each-ref", "log", "diff", "remote")
+        val VERBS = setOf("rev-parse", "status", "for-each-ref", "log", "show", "diff", "remote")
 
         val STATUS = listOf(
             "# branch.oid aaaaaaaaaaaaaaaaaaaa",
@@ -780,7 +806,39 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             "1 M. N... 100644 100644 100644 aaa bbb src/Main.kt",
         ).joinToString(NUL.toString()) + NUL
 
-        val LOG = "abc123${FS}abc123${FS}Add the thing${FS}Ada${FS}2 hours ago${FS}HEAD -> main\n"
+        /**
+         * Deliberately shaped like a real shared repository: eight-character hashes, refs long
+         * enough to crowd the row, and merge subjects. The hash column used to wrap at this size.
+         */
+        val LOG = listOf(
+            "c2c22b8e11${FS}c2c22b8e${FS}Merge branch 'dtsv/NOTASK-partial-orders-fix' into 'main'" +
+                "${FS}Dmitry Tsvetkov${FS}17 hours ago${FS}HEAD -> main, origin/main, origin/HEAD",
+            "14142ab022${FS}14142ab0${FS}Partial close fix${FS}dmitry.tsvetkov${FS}17 hours ago" +
+                "${FS}dtsv/NOTASK-partial-orders-fix",
+            "04dd069b33${FS}04dd069b${FS}Merge branch 'kmp-stage-adaptation' into 'FM-3713-release-5.7'" +
+                "${FS}artem.bambalov${FS}3 days ago$FS",
+            "1917f2a544${FS}1917f2a5${FS}Set marketing version to 5.8${FS}app_mtaciuser${FS}3 days ago$FS",
+        ).joinToString("\n", postfix = "\n")
+
+        /** `git show` for whichever commit the Log tab asks about. */
+        val COMMIT_PATCH = """
+            diff --git a/src/Orders.kt b/src/Orders.kt
+            --- a/src/Orders.kt
+            +++ b/src/Orders.kt
+            @@ -12,6 +12,7 @@
+             fun close(order: Order) {
+            -    order.state = CLOSED
+            +    order.state = if (order.partial) PARTIAL else CLOSED
+            +    audit(order)
+             }
+            diff --git a/README.md b/README.md
+            new file mode 100644
+            --- /dev/null
+            +++ b/README.md
+            @@ -0,0 +1,2 @@
+            +# Orders
+            +Partial close is supported.
+        """.trimIndent()
 
         val DIFF = """
             diff --git a/src/Main.kt b/src/Main.kt
