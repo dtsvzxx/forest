@@ -95,11 +95,18 @@ activity — and shows the same ages, so the two never disagree about which one 
 ./gradlew :desktopApp:packageDmg   # macOS · also packageMsi, packageDeb
 ```
 
-The DMG is unsigned and arm64-only. It runs on the machine that built it, but a copy downloaded from
-anywhere is quarantined and Gatekeeper will refuse it until either you clear the flag
-(`xattr -dr com.apple.quarantine /Applications/Forest.app`) or the build is signed with a Developer
-ID and notarized — set `FOREST_MACOS_SIGNING_IDENTITY`, `FOREST_APPLE_ID`, `FOREST_APPLE_PASSWORD`
-and `FOREST_APPLE_TEAM_ID` and the build picks them up.
+The plain DMG is ad-hoc signed and arm64-only: it runs where it was built, but a downloaded copy is
+quarantined and Gatekeeper refuses it. A release is signed with a Developer ID and notarized:
+
+```bash
+xcrun notarytool store-credentials forest-notary --apple-id <you> --team-id 7FCH84EN89   # once
+export FOREST_MACOS_SIGNING_IDENTITY="Developer ID Application: Dmitry Tsvetkov (7FCH84EN89)"
+./gradlew :desktopApp:stapleDmg
+```
+
+That packages, signs with a hardened runtime, submits to Apple, waits, and staples the ticket to the
+image so it verifies without a network. The password stays in the keychain and never reaches a
+command line.
 
 Third-party notices ship inside the bundle at `Contents/app/resources/THIRD-PARTY-NOTICES.md`.
 

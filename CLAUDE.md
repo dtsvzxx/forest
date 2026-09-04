@@ -323,15 +323,39 @@ environment Finder actually gives an app (`PATH=/usr/bin:/bin:/usr/sbin:/sbin` a
 starts and finds git; `GitLocator` and `FileSystemAccess.findOnPath` both carry fallback directories
 for exactly that reason.
 
-**The build is unsigned and arm64-only.** jpackage ad-hoc signs the binary, which is enough to run
-where it was built and not enough to hand to anyone: `spctl -a` rejects it, and a *downloaded* copy
-carries the quarantine flag and is refused outright. Two ways forward:
+### Signing and notarization
 
-- Locally, `xattr -dr com.apple.quarantine /Applications/Forest.app` after installing.
-- Properly, a Developer ID identity and notarization. The build reads both from the environment and
-  is inert without them — `FOREST_MACOS_SIGNING_IDENTITY` (or `-Pforest.macos.signingIdentity`) turns
-  signing on, and `FOREST_APPLE_ID` / `FOREST_APPLE_PASSWORD` / `FOREST_APPLE_TEAM_ID` feed
-  `notarizeDmg`.
+A release has to be both. Apple will not notarize an unsigned build, and macOS will not run a
+*downloaded* signed build that has not been notarized — `spctl` calls that state
+`source=Unnotarized Developer ID`.
+
+```bash
+export FOREST_MACOS_SIGNING_IDENTITY="Developer ID Application: Dmitry Tsvetkov (7FCH84EN89)"
+./gradlew :desktopApp:stapleDmg      # packages, signs, submits, waits, staples
+```
+
+Signing is verified working: full Developer ID chain, secure timestamp, `flags=0x10000(runtime)`,
+`codesign --verify --deep --strict` clean, and the signed hardened-runtime build starts under a
+Finder-like environment. The entitlements the Compose plugin applies by default are the ones this
+app needs, and one of them is not optional: **`com.apple.security.cs.disable-library-validation`**.
+pty4j extracts its native helper at runtime and loads it, and hardened runtime refuses an unsigned
+dylib without that entitlement — so a pane would fail to open in a signed build and nowhere else.
+The other two, `allow-jit` and `allow-unsigned-executable-memory`, are what any JVM needs.
+
+Notarization needs an app-specific password. `stapleDmg` takes it from a **keychain profile** rather
+than the environment, so it never reaches a command line, a build log or a shell history. One-time:
+
+```bash
+xcrun notarytool store-credentials forest-notary \
+  --apple-id <your-apple-id> --team-id 7FCH84EN89
+```
+
+The plugin's own `notarizeDmg` reads `FOREST_APPLE_ID` / `FOREST_APPLE_PASSWORD` /
+`FOREST_APPLE_TEAM_ID` instead — that is the CI path, where the secret comes from a runner's secret
+store.
+
+Stapling matters on its own: without the ticket attached, a first launch on a machine with no
+network cannot verify the notarization.
 
 An Intel Mac cannot run it: the bundled runtime and Skiko's native library are both arm64. A
 universal build needs two runtimes and is not set up.

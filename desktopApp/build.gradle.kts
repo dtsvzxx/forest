@@ -31,6 +31,11 @@ dependencies {
  * anyone: a downloaded copy carries the quarantine flag and Gatekeeper refuses it. That needs a
  * Developer ID identity and notarization, and neither belongs in a repository.
  */
+val appVersion = "1.0.0"
+
+/** The Developer ID team this is signed and notarized under. */
+val TEAM_ID = "7FCH84EN89"
+
 val macSigningIdentity: Provider<String> =
     providers.gradleProperty("forest.macos.signingIdentity")
         .orElse(providers.environmentVariable("FOREST_MACOS_SIGNING_IDENTITY"))
@@ -43,7 +48,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Forest"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion
             description = "Forest — a git worktree manager"
             vendor = "mainactor"
             copyright = "© 2026 mainactor"
@@ -71,10 +76,13 @@ compose.desktop {
                     sign.set(macSigningIdentity.map { it.isNotBlank() })
                     identity.set(macSigningIdentity)
                 }
+                // The plugin's own `notarizeDmg` reads the three from the environment, which is
+                // what a CI runner has. Locally, prefer `stapleDmg` below: it keeps the
+                // app-specific password in the keychain instead of on a command line.
                 notarization {
                     appleID.set(providers.environmentVariable("FOREST_APPLE_ID").orElse(""))
                     password.set(providers.environmentVariable("FOREST_APPLE_PASSWORD").orElse(""))
-                    teamID.set(providers.environmentVariable("FOREST_APPLE_TEAM_ID").orElse(""))
+                    teamID.set(providers.environmentVariable("FOREST_APPLE_TEAM_ID").orElse(TEAM_ID))
                 }
             }
             windows {
@@ -88,6 +96,49 @@ compose.desktop {
             linux { iconFile.set(project.file("icons/forest.png")) }
         }
     }
+}
+
+/**
+ * Notarization against credentials kept in the keychain.
+ *
+ * Apple will not notarize an unsigned build, and macOS will not run a *downloaded* signed build that
+ * has not been notarized — so this is the last step before a DMG can be given to anyone.
+ *
+ * One-time setup, typed by you so the app-specific password never reaches a command line, a build
+ * log or a shell history:
+ *
+ * ```
+ * xcrun notarytool store-credentials forest-notary \
+ *   --apple-id <your-apple-id> --team-id $TEAM_ID
+ * ```
+ *
+ * Then `./gradlew :desktopApp:stapleDmg` signs, submits, waits, and staples the ticket to the image
+ * so it also verifies offline.
+ */
+val notaryProfile: Provider<String> =
+    providers.gradleProperty("forest.macos.notaryProfile")
+        .orElse(providers.environmentVariable("FOREST_NOTARY_PROFILE"))
+        .orElse("forest-notary")
+
+val dmgFile = layout.buildDirectory.file("compose/binaries/main/dmg/Forest-$appVersion.dmg")
+
+val submitDmg = tasks.register<Exec>("submitDmgForNotarization") {
+    group = "compose desktop"
+    description = "Uploads the DMG to Apple and waits for the verdict."
+    dependsOn("packageDmg")
+    commandLine(
+        "xcrun", "notarytool", "submit",
+        dmgFile.get().asFile.absolutePath,
+        "--keychain-profile", notaryProfile.get(),
+        "--wait",
+    )
+}
+
+tasks.register<Exec>("stapleDmg") {
+    group = "compose desktop"
+    description = "Attaches the notarization ticket to the DMG, so it verifies without a network."
+    dependsOn(submitDmg)
+    commandLine("xcrun", "stapler", "staple", dmgFile.get().asFile.absolutePath)
 }
 
 /**
