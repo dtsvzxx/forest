@@ -176,6 +176,11 @@ and friends) while leaving the stored value alone, so the panes come back when t
 
 Layout traps that have already bitten this code:
 
+- **`border` is Gray1 — the same value as `editor`.** That is faithful to the New UI, where a
+  border is *darker* than the panel it edges, but it means a `HorizontalDivider`/`Splitter` drawn
+  between two editor-coloured regions is painted and invisible. Panes on that surface (Log, Search)
+  pass `separator` (Gray3) instead. `AppRenderTest` scans a column of the rendered Search tab for
+  rows of that exact colour, so the line has to be visible and not merely present.
 - **A column of text sized by a guessed `dp` width will eventually wrap.** The Log tab's hash
   column was 62.dp against an eight-character monospace hash, which fitted in theory and wrapped in
   practice; the second line was then clipped by the row height. Where a column is monospace and

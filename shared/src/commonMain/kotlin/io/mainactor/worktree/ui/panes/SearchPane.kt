@@ -75,7 +75,9 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
         },
     ) {
         SearchField(state)
-        HorizontalDivider()
+        // This pane is drawn on `editor`, and `border` is that same Gray1 — every divider in here
+        // takes `separator` or it is painted and invisible.
+        HorizontalDivider(color = colors.separator)
 
         Box(Modifier.fillMaxWidth().height(shownListHeight)) { Results(state) }
         HorizontalSplitter(
@@ -83,6 +85,7 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
             onSizeChange = { listHeight = it },
             min = 80.dp,
             max = 720.dp,
+            color = colors.separator,
         )
 
         Row(Modifier.fillMaxWidth().weight(1f)) {
@@ -94,6 +97,7 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
                 onSizeChange = { historyWidth = it },
                 min = 200.dp,
                 max = 560.dp,
+                color = colors.separator,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 state.fileDiff?.let { DiffHeader(it) }

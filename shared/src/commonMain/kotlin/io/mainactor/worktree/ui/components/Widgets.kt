@@ -239,13 +239,19 @@ typealias RowScopeActions = @Composable () -> Unit
 
 /** The 1px rules the IDE uses between panes and headers. */
 @Composable
-fun HorizontalDivider(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(1.dp).background(LocalWorktreeColors.current.border))
+fun HorizontalDivider(
+    modifier: Modifier = Modifier,
+    color: Color = LocalWorktreeColors.current.border,
+) {
+    Box(modifier.fillMaxWidth().height(1.dp).background(color))
 }
 
 @Composable
-fun VerticalDivider(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxHeight().width(1.dp).background(LocalWorktreeColors.current.border))
+fun VerticalDivider(
+    modifier: Modifier = Modifier,
+    color: Color = LocalWorktreeColors.current.border,
+) {
+    Box(modifier.fillMaxHeight().width(1.dp).background(color))
 }
 
 /** A row in a tree/list, with IDE selection and hover behaviour. */
@@ -365,7 +371,8 @@ fun VerticalSplitter(
     min: Dp = 140.dp,
     max: Dp = 640.dp,
     sizesTrailingPane: Boolean = false,
-) = Splitter(true, size, onSizeChange, modifier, min, max, sizesTrailingPane)
+    color: Color = LocalWorktreeColors.current.border,
+) = Splitter(true, size, onSizeChange, modifier, min, max, sizesTrailingPane, color)
 
 @Composable
 fun HorizontalSplitter(
@@ -375,7 +382,8 @@ fun HorizontalSplitter(
     min: Dp = 80.dp,
     max: Dp = 720.dp,
     sizesTrailingPane: Boolean = false,
-) = Splitter(false, size, onSizeChange, modifier, min, max, sizesTrailingPane)
+    color: Color = LocalWorktreeColors.current.border,
+) = Splitter(false, size, onSizeChange, modifier, min, max, sizesTrailingPane, color)
 
 /**
  * A divider that moves a *proportion* rather than an absolute size.
@@ -463,6 +471,13 @@ private fun Splitter(
     max: Dp,
     /** True when the sized pane sits *after* the divider, so dragging back towards it grows it. */
     sizesTrailingPane: Boolean,
+    /**
+     * The line's colour at rest.
+     *
+     * `border` is Gray1 — the *same* value as `editor` — so a divider drawn with it between two
+     * editor-coloured regions is painted and invisible. Panes on that surface pass `separator`.
+     */
+    color: Color,
 ) {
     val colors = LocalWorktreeColors.current
     val currentSize by rememberUpdatedState(size)
@@ -514,7 +529,7 @@ private fun Splitter(
                         Modifier.fillMaxWidth().height(1.dp)
                     }
                 )
-                .background(if (active) colors.accent else colors.border),
+                .background(if (active) colors.accent else color),
         )
     }
 }

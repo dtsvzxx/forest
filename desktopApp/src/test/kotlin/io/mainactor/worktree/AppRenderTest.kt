@@ -117,6 +117,15 @@ class AppRenderTest {
         File("build/reports/app-render-search.png").apply { parentFile?.mkdirs() }
             .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
 
+        // Every divider in this pane sits between two `editor`-coloured regions, and `border` is
+        // that same Gray1 — drawn with it, a separator is painted and invisible. Scanning a column
+        // clear of the vertical splitter for lines that are actually a different colour is what
+        // tells "there is a divider here" from "there is nothing here".
+        assertTrue(
+            rowsWithColour(image, x = WIDTH - 80, from = 70, to = HEIGHT - 40, rgb = SEPARATOR) >= 2,
+            "the search field and the pane splitter should both be separated by a visible line",
+        )
+
         // Name matches rank above path-only ones: Orders.kt before src/orders/....
         assertEquals("src/Orders.kt", state.searchResults.first())
         assertEquals(3, state.searchResults.size, "only the paths containing the query")
@@ -152,6 +161,29 @@ class AppRenderTest {
             hasNonPanelPixels(image, x = 460, y = 90, width = 320, height = 60),
             "no tooltip appeared under the hovered button",
         )
+    }
+
+    /** How many pixel rows in the column at [x] are exactly [rgb] — one row per drawn divider. */
+    private fun rowsWithColour(
+        image: org.jetbrains.skia.Image,
+        x: Int,
+        from: Int,
+        to: Int,
+        rgb: Int,
+    ): Int {
+        val pixels = image.peekPixels() ?: return 0
+        val bytes = pixels.buffer.bytes
+        val rowBytes = pixels.rowBytes
+        var found = 0
+        for (row in from until to) {
+            val i = row * rowBytes + x * 4
+            if (i + 2 >= bytes.size) continue
+            val colour = ((bytes[i].toInt() and 0xFF) shl 16) or
+                ((bytes[i + 1].toInt() and 0xFF) shl 8) or
+                (bytes[i + 2].toInt() and 0xFF)
+            if (colour == rgb) found++
+        }
+        return found
     }
 
     /** True when the region contains something other than the flat panel colour. */
@@ -750,6 +782,9 @@ class AppRenderTest {
 
         /** Height of a row in the worktree picker. */
         const val PICKER_ROW_HEIGHT = 26f
+
+        /** `WorktreeColors.separator` — Gray3, the one divider colour visible on the editor. */
+        const val SEPARATOR = 0x393B40
     }
 }
 

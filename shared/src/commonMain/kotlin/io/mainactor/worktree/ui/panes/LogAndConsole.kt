@@ -81,11 +81,13 @@ fun LogPane(state: AppState, modifier: Modifier = Modifier) {
         },
     ) {
         Box(Modifier.fillMaxWidth().height(shownListHeight)) { CommitList(state) }
+        // Drawn on `editor`, where `border` is the identical Gray1; see SearchPane.
         HorizontalSplitter(
             size = listHeight,
             onSizeChange = { listHeight = it },
             min = 80.dp,
             max = 720.dp,
+            color = colors.separator,
         )
         Row(Modifier.fillMaxWidth().weight(1f)) {
             Box(Modifier.width(shownFilesWidth).fillMaxHeight().background(colors.panel)) {
@@ -96,6 +98,7 @@ fun LogPane(state: AppState, modifier: Modifier = Modifier) {
                 onSizeChange = { filesWidth = it },
                 min = 160.dp,
                 max = 520.dp,
+                color = colors.separator,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 state.commitFile?.let { DiffHeader(it) }
