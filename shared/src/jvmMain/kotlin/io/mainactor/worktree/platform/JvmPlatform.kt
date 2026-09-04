@@ -70,6 +70,12 @@ class ProcessCommandRunner : CommandRunner {
     }
 }
 
+/** [ShellRunner] over the user's login shell. */
+class JvmShellRunner(private val runner: CommandRunner = ProcessCommandRunner()) : ShellRunner {
+    override suspend fun run(workDir: String, commandLine: String): CommandResult =
+        runner.exec(workDir, Os.loginShellCommand(commandLine))
+}
+
 class JvmFileSystemAccess(
     /** Overridable so tests can keep the recent-projects file inside a temp tree. */
     private val home: String = System.getProperty("user.home") ?: "/",
@@ -205,6 +211,12 @@ object Os {
      * A login shell is what gives the agent the user's own `PATH`, aliases and credential helpers,
      * which is the whole reason a pane has ever run one.
      */
+    /** A login shell that runs [command] and exits, for work with no terminal attached. */
+    fun loginShellCommand(command: String): List<String> = when {
+        isWindows -> listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/c", command)
+        else -> listOf(System.getenv("SHELL") ?: "/bin/bash", "-l", "-c", command)
+    }
+
     fun shellRunning(command: String?): List<String> {
         if (command.isNullOrBlank()) return defaultShell()
         if (isWindows) return listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/k", command)

@@ -25,6 +25,13 @@ data class AgentSpec(
     val tool: AgentTool? = null,
     /** Built-ins cannot be renamed or removed, only switched off for a project. */
     val builtIn: Boolean = true,
+    /**
+     * Run it with no terminal at all, reporting only when it fails.
+     *
+     * For the things you want done rather than watched — a formatter, a build, a check. The agents
+     * are never this: the point of an agent is the conversation, which has to be on screen.
+     */
+    val background: Boolean = false,
 ) {
     val isShell: Boolean get() = command.isBlank()
 }

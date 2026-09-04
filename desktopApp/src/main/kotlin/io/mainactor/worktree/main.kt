@@ -18,6 +18,7 @@ import io.mainactor.worktree.git.GitLogEntry
 import io.mainactor.worktree.platform.DesktopSystemIntegration
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
+import io.mainactor.worktree.platform.JvmShellRunner
 import io.mainactor.worktree.platform.Os
 import io.mainactor.worktree.platform.ProcessCommandRunner
 import io.mainactor.worktree.platform.SwingDirectoryChooser
@@ -133,6 +134,7 @@ private fun rememberAppState(terminals: TerminalSessionManager): AppState {
             fs = fs,
             store = ProjectStore(fs),
             chooser = SwingDirectoryChooser(),
+            shell = JvmShellRunner(),
             system = DesktopSystemIntegration(),
             scope = scope,
             onTerminalDisposed = terminals::close,

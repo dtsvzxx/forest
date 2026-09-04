@@ -5,6 +5,7 @@ import io.mainactor.worktree.platform.DesktopSystemIntegration
 import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
+import io.mainactor.worktree.platform.JvmShellRunner
 import io.mainactor.worktree.platform.ProcessCommandRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
@@ -68,6 +69,7 @@ class RefreshCostTest {
             git = Git(ProcessCommandRunner(), fs, gitPath, onLog = { sink?.invoke(it) }),
             fs = fs,
             store = ProjectStore(fs),
+            shell = JvmShellRunner(),
             chooser = object : DirectoryChooser {
                 override suspend fun chooseDirectory(title: String, startIn: String?): String? = null
             },

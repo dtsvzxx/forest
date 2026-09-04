@@ -231,17 +231,22 @@ private fun WorktreeRow(
                     // One entry per agent the project offers, because a submenu is not something
                     // Compose Desktop's context menu has and a picker for two items is a click too
                     // many for the thing you do most.
-                    val agents = state.availableAgents
-                    if (agents.isEmpty()) {
+                    val (background, inPane) = state.availableAgents.partition { it.background }
+                    if (inPane.isEmpty()) {
                         add(ContextMenuItem("Start agent here") { state.startAgentFor(worktree) })
                     } else {
-                        agents.forEach { agent ->
+                        inPane.forEach { agent ->
                             add(
                                 ContextMenuItem("Start ${agent.name} here") {
                                     state.startAgentFor(worktree, agent)
                                 },
                             )
                         }
+                    }
+                    // These open nothing. "Run" rather than "Start" is the whole difference the
+                    // user gets to see before clicking.
+                    background.forEach { command ->
+                        add(ContextMenuItem("Run ${command.name}") { state.runCommand(worktree, command) })
                     }
                     add(ContextMenuItem("Switch branch…", onSwitchBranch))
                 }

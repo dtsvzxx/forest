@@ -49,6 +49,7 @@ class AgentSettingsStore(private val fs: FileSystemAccess) {
                                     put("id", spec.id)
                                     put("name", spec.name)
                                     put("command", spec.command)
+                                    put("background", spec.background)
                                 })
                             }
                         })
@@ -94,6 +95,7 @@ class AgentSettingsStore(private val fs: FileSystemAccess) {
                 name = obj["name"]?.jsonPrimitive?.contentOrNull() ?: id,
                 command = obj["command"]?.jsonPrimitive?.contentOrNull().orEmpty(),
                 builtIn = false,
+                background = obj["background"]?.jsonPrimitive?.contentOrNull() == "true",
             )
         }.orEmpty(),
     )

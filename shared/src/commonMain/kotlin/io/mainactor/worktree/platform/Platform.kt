@@ -26,6 +26,17 @@ interface CommandRunner {
     ): CommandResult
 }
 
+/**
+ * Runs a shell command line in a directory, the way the user's own terminal would.
+ *
+ * Separate from [CommandRunner] because the interesting part is not spawning a process but *which*
+ * shell: a project's command is a command line, and it expects the `PATH`, aliases and version
+ * managers a login shell sets up. A windowed app's inherited environment has none of that.
+ */
+interface ShellRunner {
+    suspend fun run(workDir: String, commandLine: String): CommandResult
+}
+
 /** The handful of filesystem operations the UI needs, kept behind an interface for the same reason. */
 interface FileSystemAccess {
     fun exists(path: String): Boolean

@@ -236,8 +236,11 @@ private const val COMMIT_LIST_MAX_SHARE = 0.7f
 private const val COMMIT_FILES_MAX_SHARE = 0.5f
 
 /**
- * Every git command the app ran, with its output. Nothing this UI does to a repository is
- * hidden behind a button label — if a button surprises you, the exact invocation is here.
+ * Every command the app ran, with its output — git's own, and the project's background commands.
+ *
+ * Nothing this UI does to a repository is hidden behind a button label: if a button surprises you,
+ * the exact invocation is here. A background command that succeeded says nothing anywhere else, so
+ * this is the only place it can be read afterwards.
  */
 @Composable
 fun ConsolePane(state: AppState, modifier: Modifier = Modifier) {
@@ -249,7 +252,7 @@ fun ConsolePane(state: AppState, modifier: Modifier = Modifier) {
     }
 
     if (state.gitLog.isEmpty()) {
-        EmptyState("No git commands run yet.", modifier)
+        EmptyState("No commands run yet.", modifier)
         return
     }
 

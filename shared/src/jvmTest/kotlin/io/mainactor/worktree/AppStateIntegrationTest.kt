@@ -14,6 +14,7 @@ import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.usage.ClaudeUsageSource
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
+import io.mainactor.worktree.platform.JvmShellRunner
 import io.mainactor.worktree.platform.ProcessCommandRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
@@ -94,6 +95,7 @@ class AppStateIntegrationTest {
             git = Git(ProcessCommandRunner(), fs, gitPath, onLog = { sink?.invoke(it) }),
             fs = fs,
             store = ProjectStore(fs),
+            shell = JvmShellRunner(),
             chooser = object : DirectoryChooser {
                 override suspend fun chooseDirectory(title: String, startIn: String?): String? = null
             },
@@ -223,6 +225,89 @@ class AppStateIntegrationTest {
 
             assertEquals("claude --continue", state.agents.last().command)
         }
+
+    @Test
+    fun `a background command that succeeds says nothing`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val command = AgentSpec("custom-ok", "Check", "exit 0", builtIn = false, background = true)
+
+        state.runCommand(state.worktrees.single(), command).join()
+
+        // The user asked for the thing to be done, not watched.
+        assertNull(state.commandFailure)
+        assertTrue(state.agents.isEmpty(), "a background command opens no pane")
+        assertTrue(state.backgroundRuns.isEmpty(), "and stops being reported as running")
+        // It is still in the Console, so a run that "worked" can be read afterwards.
+        assertTrue(state.gitLog.any { it.command == "exit 0" && it.ok })
+    }
+
+    @Test
+    fun `a background command that fails brings back its output`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val command = AgentSpec(
+            id = "custom-build",
+            name = "Build",
+            command = "echo 'compiling' ; echo 'error: boom' >&2 ; exit 3",
+            builtIn = false,
+            background = true,
+        )
+
+        state.runCommand(state.worktrees.single(), command).join()
+
+        val failure = assertNotNull(state.commandFailure)
+        assertEquals("Build", failure.name)
+        assertEquals(3, failure.exitCode)
+        // Both streams: a compiler says what it was doing on one and what went wrong on the other.
+        assertTrue("compiling" in failure.output, failure.output)
+        assertTrue("error: boom" in failure.output, failure.output)
+        assertTrue(state.gitLog.any { it.command.startsWith("echo 'compiling'") && !it.ok })
+    }
+
+    @Test
+    fun `a background command runs inside the worktree it was started from`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "elsewhere").path,
+            newBranch = "elsewhere",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        val worktree = state.worktrees.single { !it.isMain }
+        // Fails on purpose, because a failure is the only way it can report anything.
+        val command = AgentSpec("custom-pwd", "Where", "pwd >&2; exit 1", builtIn = false, background = true)
+
+        state.runCommand(worktree, command).join()
+
+        val output = assertNotNull(state.commandFailure).output
+        assertTrue(File(root, "elsewhere").canonicalPath in output, output)
+    }
+
+    @Test
+    fun `a command's run mode survives being saved`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.saveProjectAgents(
+            ProjectAgents(
+                enabled = setOf("custom-fmt"),
+                custom = listOf(
+                    AgentSpec("custom-fmt", "Format", "./gradlew fmt", builtIn = false, background = true),
+                ),
+            ),
+        )
+
+        val reopened = newState()
+        reopened.openProject(mainRepo.path).join()
+
+        assertTrue(reopened.availableAgents.single().background, "a pane would open instead")
+    }
 
     @Test
     fun `renaming a worktree moves its folder and renames its branch`() = runBlocking {

@@ -269,7 +269,11 @@ fun StatusBar(state: AppState, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        val busy = state.busy
+        // A background command has no terminal to look at, so the status bar is the only sign it is
+        // running at all.
+        val busy = state.busy ?: state.backgroundRuns.firstOrNull()?.let { first ->
+            if (state.backgroundRuns.size > 1) "$first (+${state.backgroundRuns.size - 1} more)" else first
+        }
 
         // Exactly one weighted child. Several of them would share the row evenly regardless of
         // what they contain, which truncates both halves long before they run out of room.

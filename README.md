@@ -73,8 +73,13 @@ with the folder and any agent running in it keeps running. The main working tree
 git, so only its branch is offered.
 
 Right-click a project and choose **Agents…** to say which ones it offers. Claude Code and Codex are
-offered wherever they are installed; you can switch either off, and add commands of your own — those
-just run, with no session to resume and no usage to read.
+offered wherever they are installed; you can switch either off, and add commands of your own.
+
+Your own commands run one of two ways, switched with the chip beside them. In a **pane**, like an
+agent. Or in the **background**, with no terminal at all: the worktree menu offers *Run X*, it
+executes in that worktree, and if it succeeds you hear nothing. If it fails you get its output —
+both streams — with the exit code and a button to copy it. Either way the run is appended to the
+Console tab beside the git commands, so a command that worked can still be read afterwards.
 
 **Every** way of adding a pane — the split buttons, the shortcuts, the `+` — asks which repository
 and which worktree it runs in, because agents are commonly spread across several repositories and a

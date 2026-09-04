@@ -340,6 +340,19 @@ Homebrew and version-manager shims, so the dialog lists every built-in whatever 
 "not found on PATH" beside the ones it did not. The agent runs in a login shell, which will find
 them anyway.
 
+**A project command can run with no terminal at all.** A custom entry in the same dialog carries a
+`background` flag; those appear in the worktree menu as *Run X* rather than *Start X here*, execute
+through `ShellRunner` (a login shell, same reasoning as a pane), and say nothing when they succeed.
+A failure sets `AppState.commandFailure`, which `App` renders as a modal holding the output — a
+command with nothing on screen has no other way to explain itself. Every run, successful or not, is
+appended to the Console tab beside the git commands; `recordGitLog` renumbers each entry, which is
+what keeps the two sources from colliding on the `seq` the Console list is keyed by.
+
+Background runs are outside `gitLock` — a build that takes a minute must not hold up a refresh — and
+several can be in flight in different worktrees at once, which is why `backgroundRuns` is a list and
+the status bar shows the first with a count. The refresh afterwards goes through `refresh()` so it
+takes the lock like every other one.
+
 ## Usage statistics
 
 Each agent pane's header shows what the agent CLIs have spent in that pane's worktree — tokens and

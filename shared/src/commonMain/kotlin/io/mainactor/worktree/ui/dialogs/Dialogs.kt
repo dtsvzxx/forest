@@ -39,6 +39,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.mainactor.worktree.model.Branch
 import io.mainactor.worktree.ui.components.ToolButton
+import io.mainactor.worktree.CommandFailure
+import io.mainactor.worktree.ui.components.Tooltip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import io.mainactor.worktree.model.AgentSpec
 import io.mainactor.worktree.model.BuiltInAgents
 import io.mainactor.worktree.model.ProjectAgents
@@ -975,6 +979,7 @@ fun AgentSettingsDialog(
     var custom by remember { mutableStateOf(agents.custom) }
     var newName by remember { mutableStateOf("") }
     var newCommand by remember { mutableStateOf("") }
+    var newBackground by remember { mutableStateOf(false) }
 
     fun toggle(id: String) {
         enabled = if (id in enabled) enabled - id else enabled + id
@@ -1021,6 +1026,12 @@ fun AgentSettingsDialog(
                                 detail = spec.command,
                                 checked = spec.id in enabled,
                                 onToggle = { toggle(spec.id) },
+                                mode = if (spec.background) "background" else "pane",
+                                onToggleMode = {
+                                    custom = custom.map {
+                                        if (it.id == spec.id) it.copy(background = !it.background) else it
+                                    }
+                                },
                                 onRemove = {
                                     custom = custom - spec
                                     enabled = enabled - spec.id
@@ -1050,6 +1061,10 @@ fun AgentSettingsDialog(
                         textStyle = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                     )
+                    ModeChip(
+                        background = newBackground,
+                        onToggle = { newBackground = !newBackground },
+                    )
                     IdeButton(
                         text = "Add",
                         enabled = newName.isNotBlank() && newCommand.isNotBlank(),
@@ -1060,6 +1075,7 @@ fun AgentSettingsDialog(
                                 name = newName.trim(),
                                 command = newCommand.trim(),
                                 builtIn = false,
+                                background = newBackground,
                             )
                             enabled = enabled + id
                             newName = ""
@@ -1070,8 +1086,9 @@ fun AgentSettingsDialog(
             }
 
             Text(
-                text = "A pane runs its agent in a login shell and keeps the shell when the agent " +
-                    "exits, so nothing is lost if it stops.",
+                text = "A pane runs its command in a login shell and keeps the shell when it exits. " +
+                    "A background command opens nothing: it runs quietly and only says anything if " +
+                    "it fails, and then it shows you the output.",
                 color = colors.textDisabled,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1085,6 +1102,8 @@ private fun AgentToggleRow(
     detail: String,
     checked: Boolean,
     onToggle: () -> Unit,
+    mode: String? = null,
+    onToggleMode: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
 ) {
     val colors = LocalWorktreeColors.current
@@ -1117,6 +1136,9 @@ private fun AgentToggleRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (mode != null && onToggleMode != null) {
+            ModeChip(background = mode == "background", onToggle = onToggleMode)
+        }
         if (onRemove != null) {
             ToolButton(
                 icon = IconKind.CLOSE,
@@ -1217,6 +1239,91 @@ fun RenameWorktreeDialog(
                 color = if (badFolder && folder.trim().isNotEmpty()) colors.error else colors.textDisabled,
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+/** Switches one command between opening a pane and running with nothing on screen. */
+@Composable
+private fun ModeChip(background: Boolean, onToggle: () -> Unit) {
+    val colors = LocalWorktreeColors.current
+    Tooltip(
+        text = if (background) "Runs with no terminal" else "Opens a pane",
+        detail = if (background) {
+            "Nothing appears unless it fails, and then you get its output."
+        } else {
+            "A pane opens on the agent wall and stays after the command exits."
+        },
+    ) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(7.dp))
+                .background(colors.panelAlt)
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        ) {
+            Text(
+                text = if (background) "background" else "pane",
+                color = colors.textDim,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * What a background command said when it failed.
+ *
+ * The output is the whole point: a command that runs with nothing on screen has no other way to
+ * explain itself, and "it failed" without the reason is worse than not running it.
+ */
+@Composable
+fun CommandFailureDialog(
+    failure: CommandFailure,
+    onCopy: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalWorktreeColors.current
+    val scroll = rememberScrollState()
+
+    Modal(
+        title = "${failure.name} failed in ${failure.worktree}",
+        onDismiss = onDismiss,
+        width = 620.dp,
+        footer = {
+            IdeButton("Copy output", { onCopy(failure.output) })
+            IdeButton("Close", onDismiss, primary = true)
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = failure.commandLine,
+                    color = colors.textDim,
+                    style = CodeTextStyle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "exit ${failure.exitCode}",
+                    color = colors.conflicted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .clip(RoundedCornerShape(Dimens.arc))
+                    .background(colors.editor)
+                    .padding(8.dp)
+                    .verticalScroll(scroll),
+            ) {
+                Text(failure.output, color = colors.text, style = CodeTextStyle)
+            }
         }
     }
 }

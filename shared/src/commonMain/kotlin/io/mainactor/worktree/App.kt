@@ -38,6 +38,7 @@ import io.mainactor.worktree.ui.dialogs.CloneDialog
 import io.mainactor.worktree.ui.dialogs.CommitDialog
 import io.mainactor.worktree.ui.dialogs.MergeDialog
 import io.mainactor.worktree.ui.dialogs.AgentSettingsDialog
+import io.mainactor.worktree.ui.dialogs.CommandFailureDialog
 import io.mainactor.worktree.ui.dialogs.NewAgentDialog
 import io.mainactor.worktree.ui.dialogs.RenameWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
@@ -207,6 +208,16 @@ fun App(
         }
 
         Dialogs(state, dialog, onDismiss = { dialog = null })
+
+        // Not part of `dialog`: a background command fails on its own schedule, long after whatever
+        // opened it, and it has to reach the user in either mode.
+        state.commandFailure?.let { failure ->
+            CommandFailureDialog(
+                failure = failure,
+                onCopy = state.system::copyToClipboard,
+                onDismiss = { state.commandFailure = null },
+            )
+        }
     }
 }
 

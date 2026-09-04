@@ -134,6 +134,38 @@ class AppRenderTest {
     }
 
     @Test
+    fun `renders a failed command's output`() {
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            WorktreeTheme {
+                Box(Modifier.fillMaxSize().background(LocalWorktreeColors.current.editor)) {
+                    io.mainactor.worktree.ui.dialogs.CommandFailureDialog(
+                        failure = io.mainactor.worktree.CommandFailure(
+                            name = "Build",
+                            worktree = "FM-3713-release-5.7",
+                            commandLine = "./gradlew assembleDebug",
+                            exitCode = 1,
+                            output = buildString {
+                                appendLine("> Task :app:compileDebugKotlin FAILED")
+                                appendLine("e: Orders.kt:14:9 Unresolved reference 'audit'")
+                                appendLine("e: Orders.kt:15:5 Expecting '}'")
+                                appendLine()
+                                appendLine("FAILURE: Build failed with an exception.")
+                                append("BUILD FAILED in 12s")
+                            },
+                        ),
+                        onCopy = {},
+                        onDismiss = {},
+                    )
+                }
+            }
+        }
+        val image = try { scene.render(); scene.render() } finally { scene.close() }
+        val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes
+        assertTrue(png != null && png.isNotEmpty())
+        File("build/reports/app-render-command-failed.png").apply { parentFile?.mkdirs() }.writeBytes(png)
+    }
+
+    @Test
     fun `renders the rename dialog`() {
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             WorktreeTheme {
@@ -826,6 +858,11 @@ class AppRenderTest {
             git = Git(FakeRunner(worktrees, conflicted), fs, gitPath = "git"),
             fs = fs,
             store = ProjectStore(fs),
+            // The render tests never run one; a stub keeps them from reaching a real shell.
+            shell = object : io.mainactor.worktree.platform.ShellRunner {
+                override suspend fun run(workDir: String, commandLine: String) =
+                    CommandResult(0, "", "")
+            },
             chooser = object : DirectoryChooser {
                 override suspend fun chooseDirectory(title: String, startIn: String?): String? = null
             },

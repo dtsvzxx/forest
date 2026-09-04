@@ -33,6 +33,7 @@ import io.mainactor.worktree.model.Worktree
 import io.mainactor.worktree.platform.CommandResult
 import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.platform.FileSystemAccess
+import io.mainactor.worktree.platform.ShellRunner
 import io.mainactor.worktree.platform.SystemIntegration
 import io.mainactor.worktree.usage.UsageReader
 import io.mainactor.worktree.usage.WorktreeUsage
@@ -65,6 +66,15 @@ enum class AppMode { PROJECT, AGENTS }
 
 /** A transient message shown in the status bar / notification strip. */
 data class Notice(val text: String, val isError: Boolean)
+
+/** A project command that exited non-zero, with everything it said on its way out. */
+data class CommandFailure(
+    val name: String,
+    val worktree: String,
+    val commandLine: String,
+    val exitCode: Int,
+    val output: String,
+)
 
 /** One embedded terminal tab. */
 data class TerminalSession(
@@ -101,6 +111,8 @@ class AppState(
     private val fs: FileSystemAccess,
     private val store: ProjectStore,
     private val chooser: DirectoryChooser,
+    /** Runs a project's own commands, with no terminal attached. */
+    private val shell: ShellRunner,
     val system: SystemIntegration,
     private val scope: CoroutineScope,
     /** Lets the platform layer tear down the shell process behind a terminal tab we drop. */
@@ -1145,6 +1157,70 @@ class AppState(
 
     fun chooseAgentWorktree(worktree: Worktree) {
         agentWorktree = worktree
+    }
+
+    /** Commands running right now with no terminal, as "<name> in <worktree>". */
+    var backgroundRuns by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    /** The last command that failed, until the user dismisses it. */
+    var commandFailure by mutableStateOf<CommandFailure?>(null)
+
+    /**
+     * Runs one of the project's commands in a worktree with no terminal.
+     *
+     * Deliberately outside [gitLock]: it is not git, and a build that takes a minute must not hold
+     * up a refresh. Several can be in flight at once, in different worktrees, which is the point.
+     *
+     * Silence is the success case — the user asked for the thing to be done, not watched. Every run
+     * is recorded in the Console tab all the same, so a command that "worked" can still be read
+     * afterwards, and a failure is put on screen with its output.
+     */
+    fun runCommand(worktree: Worktree, agent: AgentSpec): Job {
+        val label = "${'$'}{agent.name} in ${'$'}{worktree.name}"
+        return scope.launch {
+            backgroundRuns = backgroundRuns + label
+            val result = try {
+                shell.run(worktree.path, agent.command)
+            } finally {
+                backgroundRuns = backgroundRuns - label
+            }
+
+            // recordGitLog renumbers, so every Console row has one counter behind it whether it
+            // came from git or from here — the list is keyed by that number.
+            recordGitLog(
+                GitLogEntry(
+                    seq = 0,
+                    workDir = worktree.path,
+                    command = agent.command,
+                    exitCode = result.exitCode,
+                    output = buildString {
+                        append(result.stdout)
+                        if (result.stderr.isNotBlank()) {
+                            if (isNotEmpty() && !endsWith("\n")) append('\n')
+                            append(result.stderr)
+                        }
+                    }.trimEnd(),
+                ),
+            )
+
+            if (!result.ok) {
+                commandFailure = CommandFailure(
+                    name = agent.name,
+                    worktree = worktree.name,
+                    commandLine = agent.command,
+                    exitCode = result.exitCode,
+                    output = listOf(result.stdout, result.stderr)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n")
+                        .trimEnd()
+                        .ifBlank { "The command produced no output." },
+                )
+            }
+            // Something was probably changed on disk, so the badges should say so — but under the
+            // git lock like every other refresh, not from here.
+            refresh()
+        }
     }
 
     /** Whether this agent's executable could be found; see [FileSystemAccess.findOnPath]. */
