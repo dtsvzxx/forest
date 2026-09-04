@@ -19,10 +19,15 @@ data class Pricing(
 /**
  * List prices, per million tokens.
  *
- * Taken from https://platform.claude.com/docs/en/about-claude/pricing on **2026-09-04**. Nothing on
- * disk carries a price — `additionalModelCostsCache` in `~/.claude.json` is empty and the
- * transcripts record tokens only — so this table is the whole basis of the cost figure, and it goes
- * stale silently. Every number it produces is presented as an estimate.
+ * Anthropic's from https://platform.claude.com/docs/en/about-claude/pricing and OpenAI's from
+ * https://developers.openai.com/api/docs/pricing, both on **2026-09-04**. Nothing on disk carries a
+ * price — `additionalModelCostsCache` in `~/.claude.json` is empty and neither tool's transcripts
+ * record one — so this table is the whole basis of the cost figure, and it goes stale silently.
+ * Every number it produces is presented as an estimate.
+ *
+ * The two vendors bill caching differently, which is why [Pricing] has separate write rates:
+ * Anthropic charges to *write* a cache entry at 1.25x or 2x the input rate depending on lifetime,
+ * while OpenAI charges nothing to write one and simply discounts a cached read.
  *
  * Rates are written out rather than derived from the base input price: the multipliers are 1.25x
  * for a five-minute cache write and 2x for an hour, and 0.1x for a read — except on Fable 5.1 and
@@ -61,6 +66,30 @@ object ModelPricing {
         "claude-haiku-4-5" to Pricing(1.0, 5.0, 0.10, 1.25, 2.0),
         "claude-3-5-haiku" to Pricing(0.80, 4.0, 0.08, 1.0, 1.60),
         "claude-haiku-3-5" to Pricing(0.80, 4.0, 0.08, 1.0, 1.60),
+
+        // OpenAI, from https://developers.openai.com/api/docs/pricing on 2026-09-04. Its published
+        // table has three columns — input, cached input, output — and no charge for writing a
+        // cache, so both cache-write rates are zero rather than a guess.
+        "gpt-6-astra" to Pricing(10.0, 50.0, 1.0, 0.0, 0.0),
+        "gpt-5.6-sol" to Pricing(4.0, 20.0, 0.40, 0.0, 0.0),
+        "gpt-5.6-terra" to Pricing(2.0, 12.0, 0.20, 0.0, 0.0),
+        "gpt-5.6-luna" to Pricing(0.20, 1.20, 0.02, 0.0, 0.0),
+        "gpt-5.6-cyber" to Pricing(12.50, 75.0, 1.25, 0.0, 0.0),
+        "gpt-5.5-pro" to Pricing(30.0, 180.0, 30.0, 0.0, 0.0),
+        "gpt-5.5-cyber" to Pricing(12.50, 75.0, 1.25, 0.0, 0.0),
+        "gpt-5.5" to Pricing(5.0, 30.0, 0.50, 0.0, 0.0),
+        "gpt-5.4-mini" to Pricing(0.75, 4.50, 0.075, 0.0, 0.0),
+        "gpt-5.4-nano" to Pricing(0.20, 1.25, 0.02, 0.0, 0.0),
+        "gpt-5.4-pro" to Pricing(30.0, 180.0, 30.0, 0.0, 0.0),
+        "gpt-5.4" to Pricing(2.50, 15.0, 0.25, 0.0, 0.0),
+        "gpt-5.3-codex" to Pricing(1.75, 14.0, 0.175, 0.0, 0.0),
+        "gpt-5.2-pro" to Pricing(21.0, 168.0, 21.0, 0.0, 0.0),
+        "gpt-5.2" to Pricing(1.75, 14.0, 0.175, 0.0, 0.0),
+        "gpt-5.1" to Pricing(1.25, 10.0, 0.125, 0.0, 0.0),
+        "gpt-5-mini" to Pricing(0.25, 2.0, 0.025, 0.0, 0.0),
+        "gpt-5-nano" to Pricing(0.05, 0.40, 0.005, 0.0, 0.0),
+        "gpt-5-pro" to Pricing(15.0, 120.0, 15.0, 0.0, 0.0),
+        "gpt-5" to Pricing(1.25, 10.0, 0.125, 0.0, 0.0),
     ).sortedByDescending { it.first.length }
 
     /**

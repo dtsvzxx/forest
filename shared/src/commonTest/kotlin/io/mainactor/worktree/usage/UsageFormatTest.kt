@@ -41,12 +41,14 @@ class UsageFormatTest {
         val usage = WorktreeUsage(
             byModel = mapOf(ModelKey("claude-opus-5") to TokenUsage(output = 1_000_000)),
             requests = 3,
+            sessions = 1,
         )
 
         val detail = UsageFormat.detail(usage)
 
         assertTrue("3 responses" in detail)
-        assertTrue("claude-opus-5" in detail)
+        assertTrue("1 session" in detail)
+        assertTrue("Claude Code · claude-opus-5" in detail, detail)
         // A hardcoded price table goes stale silently, so the badge must never claim to be a bill.
         assertTrue("Estimated ${'$'}25.00" in detail, detail)
         assertTrue(ModelPricing.PRICES_AS_OF in detail)
@@ -57,9 +59,28 @@ class UsageFormatTest {
         val usage = WorktreeUsage(
             byModel = mapOf(ModelKey("some-future-model") to TokenUsage(output = 10)),
             requests = 1,
+            sessions = 1,
         )
 
         assertTrue("short" in UsageFormat.detail(usage), UsageFormat.detail(usage))
+    }
+
+    @Test
+    fun `each tool gets its own line with its own subtotal`() {
+        val usage = WorktreeUsage(
+            byModel = mapOf(
+                ModelKey("claude-opus-5", tool = AgentTool.CLAUDE) to TokenUsage(output = 1_000_000),
+                ModelKey("gpt-5.3-codex", tool = AgentTool.CODEX) to TokenUsage(output = 1_000_000),
+            ),
+            requests = 4,
+            sessions = 2,
+        )
+
+        val detail = UsageFormat.detail(usage)
+
+        assertTrue("Claude Code · claude-opus-5 · 1.0M · ${'$'}25.00" in detail, detail)
+        assertTrue("Codex · gpt-5.3-codex · 1.0M · ${'$'}14.00" in detail, detail)
+        assertEquals("${'$'}39.00", UsageFormat.usd(usage.costUsd))
     }
 
     @Test
@@ -67,6 +88,7 @@ class UsageFormatTest {
         val usage = WorktreeUsage(
             byModel = mapOf(ModelKey("claude-opus-5", fast = true) to TokenUsage(output = 1_000_000)),
             requests = 1,
+            sessions = 1,
         )
 
         assertTrue("(fast)" in UsageFormat.detail(usage))

@@ -296,14 +296,29 @@ Dependencies: JediTerm and pty4j come from the JetBrains repository declared in
 
 ## Usage statistics
 
-Each agent pane's header shows what Claude Code has spent in that pane's worktree — tokens and an
-estimated cost. The source is the transcript Claude Code writes for itself at
-`~/.claude/projects/<encoded cwd>/<sessionId>.jsonl`, not the terminal: it is the usage the API
-actually reported, reading it cannot disturb a running agent, and it covers *every* session in the
-worktree, including ones started from an ordinary terminal. `usage/UsageReader.kt` carries the
-alternatives that were rejected (screen-scraping JediTerm, an `ANTHROPIC_BASE_URL` proxy).
+Each agent pane's header shows what the agent CLIs have spent in that pane's worktree — tokens and
+an estimated cost, across **Claude Code and Codex**. The source is always the session log the tool
+writes for *itself*, not the terminal: it is the usage the API actually reported, reading it cannot
+disturb a running agent, and it covers every session in the worktree, including ones started from an
+ordinary terminal. `usage/UsageReader.kt` carries the alternatives that were rejected
+(screen-scraping JediTerm, an `ANTHROPIC_BASE_URL` proxy).
 
-Four things there are easy to get wrong, and each has a test:
+`JsonlTail` is the shared half — both tools append JSONL and never rewrite it, so a poll costs only
+the bytes added. What the lines *mean* is per tool, and the two are opposites:
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| Where | `~/.claude/projects/<encoded cwd>/<sessionId>.jsonl` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Found by | directory name, corrected by the recorded `cwd` | `cwd` on the file's first line, cached |
+| Usage line | `message.usage` on `type: assistant` | `payload.info.total_token_usage` on a `token_count` event |
+| Folded by | **summing**, de-duplicated by `requestId` | **replacing** — the value is the session's running total |
+
+Getting that last row backwards is the whole risk. Codex also carries a `last_token_usage` delta on
+every event, and summing those looks equivalent — but on this machine one session in four had the
+deltas add up to *more* than the same file's total (1,479,976 against 1,404,207), because a retry
+counts in the delta and is rolled back out of the total.
+
+Four more things are easy to get wrong, and each has a test:
 
 - **One response is written as several lines**, one per content block, each repeating the identical
   `usage` object. A real transcript had 1050 assistant lines for 596 responses — summing lines
@@ -317,18 +332,29 @@ Four things there are easy to get wrong, and each has a test:
   `feature-two`. `UsageReader.claims` settles it by reading the `cwd` the transcript records.
 - **Subagents write their own files** under `<sessionId>/subagents/agent-*.jsonl`. Skipping them
   under-reports every agent that delegates.
+- **Codex's `input_tokens` already contains `cached_input_tokens`** — confirmed by arithmetic on
+  real files, where `input + output == total`. Billing both would roughly double the input line,
+  which on a long session is most of the cost. Anthropic reports the two separately instead.
+- **A Codex session's model can change mid-way**, and a cumulative counter cannot be split, so the
+  total is attributed to the model in force at the end.
 
-`ModelPricing` is a table of list prices with the date it was taken; nothing on disk records a price
-(`additionalModelCostsCache` in `~/.claude.json` is empty), so the figure is always presented as an
-estimate. Fast mode is part of `ModelKey` because it doubles Opus rates.
+`ModelPricing` holds both vendors' list prices with the date they were taken; nothing on disk
+records a price (`additionalModelCostsCache` in `~/.claude.json` is empty), so the figure is always
+presented as an estimate. `Pricing` keeps two cache-write rates because the vendors differ:
+Anthropic charges 1.25x or 2x the input rate to *write* a cache entry depending on its lifetime,
+OpenAI charges nothing to write one and only discounts the read. Fast mode is part of `ModelKey`
+because it doubles Opus rates.
 
 Reading is off `gitLock` and off the main thread — the first read of a session is the whole file and
 the largest on this machine is 59 MB — and only happens while the agent wall is on screen, driven by
 a `LaunchedEffect` there rather than a timer hidden in `AppState`.
 
-`UsageReaderTest` also runs against this machine's real transcripts, skipping when there are none;
-it cross-checks the response count against an independent text scan, which is what catches a change
-in the file format that fixtures cannot.
+`UsageReaderTest` also runs against this machine's real logs, skipping when there are none. The
+Claude side copies them to a temp directory first — the live transcript is being appended to by the
+session running the test, and a response written between the two passes made them disagree by one —
+and cross-checks the response count against an independent text scan. The Codex side takes the
+newest rollout, asks it which directory it belongs to, and checks the reader reports at least that
+session's own total, so no personal path is hardcoded.
 
 ## Tests
 

@@ -35,24 +35,35 @@ object UsageFormat {
         "${tokens(usage.tokens.total)} · ${usd(usage.costUsd)}"
 
     /**
-     * The tooltip's second line: where the number comes from and what it leaves out.
+     * The tooltip: the totals, then a line per tool, then where the money figure comes from.
      *
-     * It says "estimate" because it is one — nothing on disk records a price, so the figure is
+     * It says "estimate" because it is one — neither tool records a price, so the figure is
      * computed from a table of list prices that goes stale silently.
      */
     fun detail(usage: WorktreeUsage): String {
         val t = usage.tokens
-        val models = usage.byModel.keys
-            .sortedBy { it.model }
-            .joinToString(", ") { if (it.fast) "${it.model} (fast)" else it.model }
         return buildString {
-            append("${grouped(t.total)} tokens over ${usage.requests} responses\n")
+            append("${grouped(t.total)} tokens over ${grouped(usage.requests.toLong())} responses")
+            append(" in ${usage.sessions} ${if (usage.sessions == 1) "session" else "sessions"}\n")
             append("in ${grouped(t.input)} · out ${grouped(t.output)} · ")
             append("cache read ${grouped(t.cacheRead)} · cache write ${grouped(t.cacheWrite5m + t.cacheWrite1h)}\n")
-            if (models.isNotEmpty()) append("$models\n")
+            usage.tools.forEach { tool -> append(line(usage, tool)) }
             append("Estimated ${usd(usage.costUsd)} at list prices as of ${ModelPricing.PRICES_AS_OF}")
-            if (usage.hasUnpricedModel) append(" — and short, some tokens were spent on a model with no price here")
+            if (usage.hasUnpricedModel) {
+                append(" — and short, some tokens were spent on a model with no price here")
+            }
         }
+    }
+
+    /** One tool's share: which models it used, and what they came to. */
+    private fun line(usage: WorktreeUsage, tool: AgentTool): String {
+        val mine = usage.byModel.filterKeys { it.tool == tool }
+        val total = mine.values.fold(TokenUsage.NONE, TokenUsage::plus)
+        val cost = mine.entries.sumOf { (key, u) -> ModelPricing.of(key)?.cost(u) ?: 0.0 }
+        val models = mine.keys
+            .sortedBy { it.model }
+            .joinToString(", ") { if (it.fast) "${it.model} (fast)" else it.model }
+        return "${tool.label} · $models · ${tokens(total.total)} · ${usd(cost)}\n"
     }
 
     private fun oneDecimal(value: Double): String {

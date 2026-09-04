@@ -291,7 +291,7 @@ private fun AgentPaneHeader(
         )
         state.agentUsage[session.workDir]?.takeIf { !it.isEmpty }?.let { usage ->
             Tooltip(
-                text = "Claude usage in ${session.workDir.substringAfterLast('/')}",
+                text = "Agent usage in ${session.workDir.substringAfterLast('/')}",
                 detail = UsageFormat.detail(usage),
             ) {
                 // Unweighted: the title above keeps the row's only weight, so a long branch name
