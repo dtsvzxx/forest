@@ -50,7 +50,7 @@ enum class DiffMode {
     AGAINST_BASE,
 }
 
-enum class RightTab { CHANGES, CONFLICTS, LOG, CONSOLE }
+enum class RightTab { CHANGES, CONFLICTS, LOG, SEARCH, CONSOLE }
 
 /** The two things the window can be: a repository, or a wall of agents working in it. */
 enum class AppMode { PROJECT, AGENTS }
@@ -151,6 +151,54 @@ class AppState(
         private set
 
     var commitDiffLoading by mutableStateOf(false)
+        private set
+
+    // -------------------------------------------------------------- file search
+
+    var searchQuery by mutableStateOf("")
+        private set
+
+    /** Files matching [searchQuery], capped at [MAX_SEARCH_RESULTS]. */
+    var searchResults by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    /** True while the tracked-file index is being read for the first time. */
+    var searchIndexing by mutableStateOf(false)
+        private set
+
+    /** How many files the worktree tracks, for the field's placeholder. */
+    var searchIndexSize by mutableStateOf(0)
+        private set
+
+    /** The file whose history is on screen. */
+    var searchFile by mutableStateOf<String?>(null)
+        private set
+
+    /** Commits that touched [searchFile], newest first. */
+    var fileCommits by mutableStateOf<List<CommitInfo>>(emptyList())
+        private set
+    var fileCommit by mutableStateOf<CommitInfo?>(null)
+        private set
+    var fileDiff by mutableStateOf<FileDiff?>(null)
+        private set
+    var fileHistoryLoading by mutableStateOf(false)
+        private set
+    var fileDiffLoading by mutableStateOf(false)
+        private set
+
+    /**
+     * Every file git tracks, read once per worktree and filtered in memory.
+     *
+     * Not snapshot state: it is large, it is never drawn, and only [searchResults] — what the pane
+     * does draw — needs to make the UI recompose.
+     */
+    private var searchIndex: List<String> = emptyList()
+
+    /** The worktree [searchIndex] was read for, so a stale index is never searched. */
+    private var searchIndexFor: String? = null
+
+    /** The in-flight index read, exposed the same way [badgeRefresh] is so tests can join it. */
+    var searchIndexJob: Job? = null
         private set
 
     // ---------------------------------------------------------------- conflicts
@@ -385,6 +433,10 @@ class AppState(
         // rebased away is no longer there to show.
         if (commits.none { it.hash == selectedCommit?.hash }) clearCommitSelection()
 
+        // A commit, a checkout or a merge changes which files exist. Dropping the marker rather
+        // than the index keeps the results on screen and costs one `ls-files` on the next search.
+        searchIndexFor = null
+
         if (baseRef == null) baseRef = defaultBaseRef()
 
         if (status.operation != RepoOperation.NONE && status.conflicts.isNotEmpty()) {
@@ -480,6 +532,7 @@ class AppState(
         diff = null
         conflictFile = null
         clearCommitSelection()
+        clearSearch()
         loadWorktree(worktree)
     }
 
@@ -546,6 +599,106 @@ class AppState(
         selectedCommit = null
         commitFiles = emptyList()
         commitFile = null
+    }
+
+    // -------------------------------------------------------------- file search
+
+    /**
+     * Filters the worktree's tracked files by [query].
+     *
+     * The filtering is synchronous against an in-memory index, so typing never waits on a child
+     * process; only the first search in a worktree launches one, to read that index.
+     */
+    fun search(query: String) {
+        searchQuery = query
+        val dir = selectedWorktree?.path
+        if (dir != null && searchIndexFor != dir) {
+            // The results already on screen stay until the index lands, rather than blinking empty.
+            loadSearchIndex(dir)
+            return
+        }
+        searchResults = matching(query)
+    }
+
+    private fun loadSearchIndex(dir: String) {
+        if (searchIndexJob?.isActive == true) return
+        searchIndexJob = run(null) {
+            searchIndexing = true
+            try {
+                searchIndex = git.listFiles(dir)
+                searchIndexFor = dir
+            } finally {
+                searchIndexing = false
+            }
+            searchIndexSize = searchIndex.size
+            // The query may have grown while git was reading; match against the current one.
+            searchResults = matching(searchQuery)
+        }
+    }
+
+    /**
+     * Ranks a file search.
+     *
+     * A query is nearly always aimed at the file's *name*, not the folders above it, so anything
+     * matching the name sorts first; within each group the shortest path wins, which puts
+     * `Main.kt` above `test/fixtures/deeply/nested/Main.kt`.
+     */
+    private fun matching(query: String): List<String> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        return searchIndex
+            .filter { it.contains(q, ignoreCase = true) }
+            .sortedWith(
+                compareBy(
+                    { !it.substringAfterLast('/').contains(q, ignoreCase = true) },
+                    { it.length },
+                    { it },
+                ),
+            )
+            .take(MAX_SEARCH_RESULTS)
+    }
+
+    /** Loads the commits that touched [path], and opens the newest of them. */
+    fun selectSearchFile(path: String) = run(null) {
+        val dir = selectedWorktree?.path ?: return@run
+        searchFile = path
+        fileCommit = null
+        fileDiff = null
+        fileHistoryLoading = true
+        fileCommits = try {
+            git.fileHistory(dir, path)
+        } finally {
+            fileHistoryLoading = false
+        }
+        fileCommits.firstOrNull()?.let { loadFileDiff(dir, it, path) }
+    }
+
+    fun selectFileCommit(commit: CommitInfo) = run(null) {
+        val dir = selectedWorktree?.path ?: return@run
+        val path = searchFile ?: return@run
+        loadFileDiff(dir, commit, path)
+    }
+
+    private suspend fun loadFileDiff(dir: String, commit: CommitInfo, path: String) {
+        fileCommit = commit
+        fileDiffLoading = true
+        fileDiff = try {
+            git.commitFileDiff(dir, commit.hash, path)
+        } finally {
+            fileDiffLoading = false
+        }
+    }
+
+    private fun clearSearch() {
+        searchQuery = ""
+        searchResults = emptyList()
+        searchIndex = emptyList()
+        searchIndexFor = null
+        searchIndexSize = 0
+        searchFile = null
+        fileCommits = emptyList()
+        fileCommit = null
+        fileDiff = null
     }
 
     fun setDiffMode(mode: DiffMode) = run(null) {
@@ -1052,6 +1205,9 @@ class AppState(
         const val MAX_LOG_ENTRIES = 500
 
         /** Refreshing a repository with dozens of worktrees should not fork dozens of gits at once. */
+        /** Enough matches to find what you meant; past this the list is scrolled, not read. */
+        const val MAX_SEARCH_RESULTS = 300
+
         const val MAX_PARALLEL_STATUS = 8
 
 

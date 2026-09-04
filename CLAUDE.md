@@ -99,6 +99,19 @@ one child process for the whole commit — the Log tab's file list is the `path`
 `FileDiff`, not a second `--name-status` call — and nothing calls it until a commit is clicked,
 because the Log tab is opened to scan subjects far more often than to read a patch.
 
+**File search** is `Git.listFiles` (`git ls-files -z`) once per worktree, filtered in memory by
+`AppState.search` — a child process per keystroke on a tree of twenty thousand files is the
+difference between instant and unusable. The index is not snapshot state (it is large and never
+drawn; only `searchResults` is), `searchIndexFor` records which worktree it belongs to, and
+`loadWorktree` clears that marker so a commit or checkout costs one `ls-files` on the next search
+rather than on every refresh. `searchIndexJob` is exposed for the same reason `badgeRefresh` is.
+
+`Git.fileHistory` uses **`--follow`**, and that is a deliberate trade: plain `git log -- <path>`
+stops dead at the commit that renamed the file, hiding most of the history on a repository that
+reorganises packages. The price is that git lists commits in which the file had another name, and
+`commitFileDiff` has no patch for that path there — the pane says so rather than going blank. Both
+halves are pinned by `a file's history reaches back past a rename`.
+
 `GitParsers` holds the pure parsing of git's machine-readable formats and carries the bulk of the
 unit tests. Two things there are easy to break:
 
@@ -285,7 +298,7 @@ filtered list), `app-render-conflicts` (a stopped merge, reached by feeding a co
 `app-render-agents` (a six-pane wall), `app-render-log` (a commit open in the Log tab, over a
 history shaped like a real shared repository — long refs, merge subjects and eight-character
 hashes, the size at which the hash column used to wrap onto a second, clipped line),
-`app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
+`app-render-search` (a file's history), `app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
 delay, since `TooltipArea` counts wall-clock time rather than frames) and `app-render-splitter`.
 Two tests drive real pointer press/move/release sequences over the dividers and assert the pane
 boundary moved; they are what caught the frozen splitters. A third renders the same state into two

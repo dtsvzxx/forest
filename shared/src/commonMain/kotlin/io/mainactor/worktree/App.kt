@@ -47,6 +47,7 @@ import io.mainactor.worktree.ui.panes.ChangesPane
 import io.mainactor.worktree.ui.panes.ConflictsPane
 import io.mainactor.worktree.ui.panes.ConsolePane
 import io.mainactor.worktree.ui.panes.LogPane
+import io.mainactor.worktree.ui.panes.SearchPane
 import io.mainactor.worktree.ui.panes.ProjectsPane
 import io.mainactor.worktree.ui.panes.WorktreesPane
 import io.mainactor.worktree.ui.theme.LocalWorktreeColors
@@ -226,6 +227,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
                 badge = { if (conflicts > 0) Badge("$conflicts", colors.conflicted) },
             )
             IdeTab("Log", state.rightTab == RightTab.LOG, { state.rightTab = RightTab.LOG })
+            IdeTab("Search", state.rightTab == RightTab.SEARCH, { state.rightTab = RightTab.SEARCH })
             IdeTab("Console", state.rightTab == RightTab.CONSOLE, { state.rightTab = RightTab.CONSOLE })
         }
         HorizontalDivider()
@@ -239,6 +241,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
                     RightTab.CHANGES -> ChangesPane(state, onCommit)
                     RightTab.CONFLICTS -> ConflictsPane(state)
                     RightTab.LOG -> LogPane(state)
+                    RightTab.SEARCH -> SearchPane(state)
                     RightTab.CONSOLE -> ConsolePane(state)
                 }
             }

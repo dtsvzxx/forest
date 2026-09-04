@@ -115,6 +115,88 @@ class AppStateIntegrationTest {
     }
 
     @Test
+    fun `searching finds a file by name without a git command per keystroke`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+        File(mainRepo, "src").mkdirs()
+        File(mainRepo, "src/Greeting.kt").writeText("fun greet() {}\n")
+        File(mainRepo, "src/Unrelated.kt").writeText("fun other() {}\n")
+        git.stageAll(mainRepo.path)
+        git.commit(mainRepo.path, "add sources")
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val before = state.gitLog.size
+
+        // Typing, one character at a time, the way the field delivers it.
+        "Greet".fold("") { typed, c -> (typed + c).also { state.search(it) } }
+        state.searchIndexJob?.join()
+        state.search("Greet")
+
+        assertEquals(listOf("src/Greeting.kt"), state.searchResults)
+        assertEquals(
+            1,
+            state.gitLog.drop(before).count { it.command.startsWith("git ls-files") },
+            "the file index must be read once, not once per keystroke",
+        )
+    }
+
+    @Test
+    fun `a search result opens the commits that touched that file`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+        File(mainRepo, "notes.md").writeText("first\n")
+        git.stageAll(mainRepo.path)
+        git.commit(mainRepo.path, "add notes")
+        File(mainRepo, "notes.md").writeText("first\nsecond\n")
+        git.stageAll(mainRepo.path)
+        git.commit(mainRepo.path, "extend notes")
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.search("notes")
+        state.searchIndexJob?.join()
+
+        state.selectSearchFile("notes.md").join()
+
+        // Newest first, and nothing that only touched file.txt.
+        assertEquals(listOf("extend notes", "add notes"), state.fileCommits.map { it.subject })
+        // The newest commit is opened for the user, with that file's patch and no other's.
+        assertEquals("extend notes", state.fileCommit?.subject)
+        assertEquals("notes.md", state.fileDiff?.path)
+        assertEquals(1, state.fileDiff?.added)
+
+        state.selectFileCommit(state.fileCommits.last()).join()
+        assertEquals("notes.md", state.fileDiff?.path)
+    }
+
+    @Test
+    fun `moving to another worktree forgets the file index and the history`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.createWorktree(
+            path = File(root, "feature").path,
+            newBranch = "feature/search",
+            existingBranch = null,
+            baseRef = null,
+            force = false,
+        ).join()
+        state.search("file")
+        state.searchIndexJob?.join()
+        state.selectSearchFile("file.txt").join()
+        assertTrue(state.fileCommits.isNotEmpty())
+
+        state.selectWorktree(state.worktrees.first { !it.isMain }).join()
+
+        // The index belongs to one worktree; a branch with different files must not be searched
+        // through the previous one's list.
+        assertEquals("", state.searchQuery)
+        assertTrue(state.searchResults.isEmpty())
+        assertNull(state.searchFile)
+        assertTrue(state.fileCommits.isEmpty())
+        assertNull(state.fileDiff)
+    }
+
+    @Test
     fun `selecting a commit loads the files it changed, and only when asked`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)

@@ -183,6 +183,55 @@ class Git(
         return if (r.ok) GitParsers.parseLog(r.stdout) else emptyList()
     }
 
+    // -------------------------------------------------------------- file search
+
+    /**
+     * Every file git tracks in [dir], as one command.
+     *
+     * The search pane filters this in memory rather than asking git per keystroke — one child
+     * process for the repository instead of one per character typed, which on a tree of twenty
+     * thousand files is the difference between instant and unusable.
+     */
+    suspend fun listFiles(dir: String): List<String> {
+        val r = run(dir, "ls-files", "-z")
+        if (!r.ok) return emptyList()
+        return r.stdout.split(GitParsers.NUL).filter { it.isNotBlank() }
+    }
+
+    /**
+     * The commits that touched [path], newest first.
+     *
+     * `--follow` is what makes this answer the question actually being asked. Plain
+     * `git log -- <path>` stops dead at the commit that renamed the file, so on a repository that
+     * ever reorganises its packages the history it shows is a fraction of the real one. The price
+     * is that git may list a commit in which the file was under a different name, and
+     * [commitFileDiff] then has no patch for that path; the pane says so rather than going blank.
+     */
+    suspend fun fileHistory(dir: String, path: String, limit: Int = 100): List<CommitInfo> {
+        val fs = GitParsers.FS
+        val r = run(
+            dir,
+            "log", "--max-count=$limit", "--follow",
+            "--format=%H$fs%h$fs%s$fs%an$fs%ar$fs%D", "--", path,
+        )
+        return if (r.ok) GitParsers.parseLog(r.stdout) else emptyList()
+    }
+
+    /** One file's patch inside one commit, under the same first-parent rule as [commitDiff]. */
+    suspend fun commitFileDiff(
+        dir: String,
+        hash: String,
+        path: String,
+        contextLines: Int = 3,
+    ): FileDiff? {
+        val r = run(
+            dir,
+            "show", "--format=", "--no-color", "--no-ext-diff", "--find-renames",
+            "-m", "--first-parent", "-U$contextLines", hash, "--", path,
+        )
+        return if (r.ok) GitParsers.parseDiff(r.stdout).firstOrNull() else null
+    }
+
     // ---------------------------------------------------------------- worktrees
 
     /**

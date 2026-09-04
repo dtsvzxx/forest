@@ -95,6 +95,36 @@ class AppRenderTest {
     }
 
     @Test
+    fun `searching for a file shows the commits that touched it`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.rightTab = RightTab.SEARCH
+            scene.render()
+            state.search("Order")
+            scene.render()
+            state.selectSearchFile(state.searchResults.first())
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-search.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        // Name matches rank above path-only ones: Orders.kt before src/orders/....
+        assertEquals("src/Orders.kt", state.searchResults.first())
+        assertEquals(3, state.searchResults.size, "only the paths containing the query")
+        assertEquals(4, state.fileCommits.size, "the file's history should have loaded")
+        assertEquals("src/Orders.kt", state.fileDiff?.path)
+    }
+
+    @Test
     fun `hovering a toolbar button shows its tooltip`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
@@ -763,6 +793,7 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             args.startsWith("for-each-ref") -> ok(if ("refs/heads" in command) BRANCHES else "")
             args.startsWith("log", "--no-walk") -> ok(commitTimes)
             args.startsWith("log") -> ok(LOG)
+            args.startsWith("ls-files") -> ok(TRACKED_FILES)
             args.startsWith("show") -> ok(COMMIT_PATCH)
             args.startsWith("diff") -> ok(DIFF)
             else -> ok("")
@@ -782,7 +813,7 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             "bugfix/ANDROID-2291-crash-on-startup",
         )
 
-        val VERBS = setOf("rev-parse", "status", "for-each-ref", "log", "show", "diff", "remote")
+        val VERBS = setOf("rev-parse", "status", "for-each-ref", "log", "ls-files", "show", "diff", "remote")
 
         val STATUS = listOf(
             "# branch.oid aaaaaaaaaaaaaaaaaaaa",
@@ -819,6 +850,15 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
                 "${FS}artem.bambalov${FS}3 days ago$FS",
             "1917f2a544${FS}1917f2a5${FS}Set marketing version to 5.8${FS}app_mtaciuser${FS}3 days ago$FS",
         ).joinToString("\n", postfix = "\n")
+
+        /** `git ls-files -z`: the index the Search tab filters in memory. */
+        val TRACKED_FILES = listOf(
+            "src/Orders.kt",
+            "src/orders/OrderRepository.kt",
+            "src/orders/PartialOrderPolicy.kt",
+            "src/payments/Refund.kt",
+            "README.md",
+        ).joinToString(NUL.toString()) + NUL
 
         /** `git show` for whichever commit the Log tab asks about. */
         val COMMIT_PATCH = """

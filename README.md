@@ -11,8 +11,17 @@ The window has two modes, switched from the top-left.
 | --- | --- |
 | **Projects** | Repositories you have opened, plus Open / New / Clone. Right-click for Show in Finder / Copy path |
 | **Worktrees** | Every working tree, newest activity first — branch, age, dirty count, ahead/behind, lock state. Create, remove, lock, prune; right-click to start or jump to an agent. |
-| **Changes** | The selected worktree's diff, as `Changes`, `Conflicts`, `Log` and `Console` tabs |
+| **Changes** | The selected worktree's diff, as `Changes`, `Conflicts`, `Log`, `Search` and `Console` tabs |
 | **Terminal** | A real shell in the selected worktree, one tab per worktree |
+
+`Log` lists the worktree's history; clicking a commit shows the files it touched beside their
+patch. Merges included — the diff is taken against the first parent, which is the only way a merge
+shows anything at all.
+
+`Search` finds a tracked file by name and then answers the follow-up question: every commit that
+touched it, and that commit's patch for that file. The history follows renames, so it reaches back
+past the commit that moved the file. `git ls-files` runs once per worktree and the filtering happens
+in memory, so typing never waits on a process.
 
 Panes are sized absolutely and dragged with the dividers: making the window bigger grows the changes
 pane, and leaves the side panels and the terminal the size you set them.

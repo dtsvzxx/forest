@@ -13,6 +13,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -56,6 +57,57 @@ class GitIntegrationTest {
 
     private fun write(name: String, content: String, dir: File = main) {
         File(dir, name).writeText(content)
+    }
+
+    @Test
+    fun `lists the tracked files and finds where one of them changed`() {
+        if (!gitAvailable) return
+        runBlocking {
+            File(main, "src").mkdirs()
+            write("src/Main.kt", "fun main() {}\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "add Main.kt")
+            write("src/Main.kt", "fun main() {\n    println(\"hi\")\n}\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "print something")
+
+            assertEquals(listOf("file.txt", "src/Main.kt"), git.listFiles(main.path).sorted())
+
+            val history = git.fileHistory(main.path, "src/Main.kt")
+
+            // Newest first, and only the commits that touched this path — the initial commit and
+            // anything that touched file.txt must not be in here.
+            assertEquals(listOf("print something", "add Main.kt"), history.map { it.subject })
+
+            val patch = assertNotNull(git.commitFileDiff(main.path, history.first().hash, "src/Main.kt"))
+            assertEquals("src/Main.kt", patch.path)
+            // The one-line body became three; the old line is the single deletion.
+            assertEquals(3, patch.added)
+            assertEquals(1, patch.removed)
+        }
+    }
+
+    @Test
+    fun `a file's history reaches back past a rename`() {
+        if (!gitAvailable) return
+        runBlocking {
+            write("before.txt", "content\n")
+            git.stageAll(main.path)
+            git.commit(main.path, "add before.txt")
+            git.run(main.path, "mv", "before.txt", "after.txt")
+            git.stageAll(main.path)
+            git.commit(main.path, "rename it")
+
+            // Without --follow git stops at the rename and reports one commit, which on a
+            // repository that reorganises packages hides most of a file's history.
+            val history = git.fileHistory(main.path, "after.txt")
+
+            assertEquals(listOf("rename it", "add before.txt"), history.map { it.subject })
+            // The rename commit itself still has a patch for the new path...
+            assertNotNull(git.commitFileDiff(main.path, history[0].hash, "after.txt"))
+            // ...while the one before it does not, because the file was called something else.
+            assertNull(git.commitFileDiff(main.path, history[1].hash, "after.txt"))
+        }
     }
 
     @Test
