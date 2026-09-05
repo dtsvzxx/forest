@@ -402,10 +402,28 @@ running rather than discovered by a command that fails: `UsageReader.hasSessions
 because Forest reads both tools' session logs for the usage badge. That check is deliberately
 separate from `read` — it must not depend on any of those sessions having spent a token.
 
-`Os.shellRunning` builds `$SHELL -l -c "<command>; exec '$SHELL' -l"`. The login shell is what gives
-an agent the user's own `PATH`, aliases and credential helpers; the trailing `exec` is what keeps
-the pane alive — and keeps whatever the agent printed on its way out — when it exits or fails to
-start. `;` rather than `&&` for the same reason.
+`Os.shellRunning` builds `<shell> -l -i -c "<command>; exec '<shell>' -l"`. The login shell is
+what gives an agent the user's own `PATH`, aliases and credential helpers; the trailing `exec` is what
+keeps the pane alive — and keeps whatever the agent printed on its way out — when it exits or fails
+to start. `;` rather than `&&` for the same reason.
+
+**`-i` is not decoration, and dropping it only breaks the packaged build.** A non-interactive login
+shell reads `.zshenv`/`.zprofile`/`.zlogin` but never `.zshrc`, which is where a shell's `PATH`
+actually lives (`~/.local/bin`, Homebrew, version-manager shims). Started from a terminal the JVM
+inherits that `PATH` anyway, so everything works; started from Finder it inherits
+`/usr/bin:/bin:/usr/sbin:/sbin` and the pane answers `zsh:1: command not found: claude`.
+`Os.loginShellCommand`, which runs the background project commands, carries the same flags for the
+same reason. `OsTest` pins both, and runs a real shell under a Finder-like environment against a
+command only an rc file puts on the `PATH`.
+
+**And the shell is `Os.userShell`, not `$SHELL`.** The same Finder launch that strips the `PATH` can
+leave `SHELL` unset entirely — a DMG-launched build had no `SHELL` while its own copy in
+`/Applications` did — and the old `?: "/bin/bash"` fallback then ran bash for an account whose shell
+is zsh: different rc files, none of them the `.zshrc` holding the `PATH`, so the pane opened on
+`bash: claude: command not found`. `userShell` asks the account database instead — `dscl` on macOS,
+the passwd entry elsewhere, which is where `chsh` writes and what Terminal itself reads — and falls
+back to `/bin/sh`, the one shell a POSIX system must have, rather than guessing which others are
+installed.
 
 `openAgent` stays **synchronous unless a resume probe is actually needed**, which is why a hotkey
 still opens a pane instantly and why the existing tests did not all have to learn to `join()`. Only

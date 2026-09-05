@@ -200,7 +200,68 @@ object Os {
     /** The device `git diff --no-index` can be pointed at to mean "this file did not exist". */
     val nullDevice: String = if (isWindows) "NUL" else "/dev/null"
 
-    /** Login shell for the embedded terminal. */
+    /**
+     * The user's own shell, which is **not** always what `$SHELL` says.
+     *
+     * A process launched from Finder inherits almost no environment, and `SHELL` is one of the
+     * variables that can be missing entirely — the same launch that reduces `PATH` to
+     * `/usr/bin:/bin:/usr/sbin:/sbin`. Falling back to `/bin/bash` there is wrong twice over: the
+     * default shell has been zsh since Catalina, so bash reads a set of rc files (`~/.bashrc`,
+     * `~/.bash_profile`) that a zsh user does not have, and every `PATH` line their `.zshrc` sets
+     * is skipped. The pane then opens on `bash: claude: command not found` — a real report, from a
+     * DMG-launched build whose sibling in `/Applications` happened to be given a `SHELL` and
+     * worked.
+     *
+     * So ask the account database, which is where `chsh` writes and what Terminal itself reads:
+     * `dscl` on macOS, the passwd entry elsewhere. The last resort is `/bin/sh`, the one shell a
+     * POSIX system is required to have, rather than a guess at which of the others is installed.
+     */
+    val userShell: String by lazy {
+        System.getenv("SHELL")?.takeIf { it.isNotBlank() }
+            ?: recordedShell()
+            ?: "/bin/sh"
+    }
+
+    private fun recordedShell(): String? {
+        val user = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return null
+        val command = when {
+            isMac -> listOf("/usr/bin/dscl", ".", "-read", "/Users/$user", "UserShell")
+            else -> listOf("getent", "passwd", user)
+        }
+        val output = runCatching {
+            val process = ProcessBuilder(command).redirectErrorStream(true).start()
+            process.outputStream.close()
+            val text = process.inputStream.readBytes().decodeToString()
+            if (process.waitFor() == 0) text else null
+        }.getOrNull() ?: return null
+        val shell = when {
+            // "UserShell: /bin/zsh"
+            isMac -> output.substringAfter("UserShell:", "").trim()
+            // "user:*:501:20::/Users/user:/bin/zsh"
+            else -> output.lineSequence().firstOrNull()?.substringAfterLast(':')?.trim().orEmpty()
+        }
+        return shell.takeIf { it.isNotBlank() && File(it).canExecute() }
+    }
+
+    /**
+     * The flags that make `$SHELL -c` behave like the terminal the user actually types in.
+     *
+     * `-l` alone is not enough, and the gap only shows in a packaged build. A *non-interactive*
+     * login shell reads `.zshenv`, `.zprofile` and `.zlogin` but **not** `.zshrc` — and `.zshrc` is
+     * where a shell puts its `PATH` (`~/.local/bin`, Homebrew, version-manager shims) and its
+     * aliases. Started from a terminal the JVM inherits that `PATH` anyway and everything works;
+     * started from Finder it inherits `/usr/bin:/bin:/usr/sbin:/sbin`, so `claude` — installed in
+     * `~/.local/bin` — came back as `zsh:1: command not found`. `-i` is what sources `.zshrc`, so
+     * the pane finds exactly what a terminal window would.
+     */
+    private val LOGIN_INTERACTIVE = listOf("-l", "-i", "-c")
+
+    /** A login shell that runs [command] and exits, for work with no terminal attached. */
+    fun loginShellCommand(command: String): List<String> = when {
+        isWindows -> listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/c", command)
+        else -> listOf(userShell) + LOGIN_INTERACTIVE + command
+    }
+
     /**
      * A login shell that runs [command] first and then hands the pane back to the user.
      *
@@ -209,25 +270,20 @@ object Os {
      * The command is separated with `;` and not `&&` for the same reason.
      *
      * A login shell is what gives the agent the user's own `PATH`, aliases and credential helpers,
-     * which is the whole reason a pane has ever run one.
+     * which is the whole reason a pane has ever run one — see [LOGIN_INTERACTIVE] for why it also
+     * has to be an interactive one.
      */
-    /** A login shell that runs [command] and exits, for work with no terminal attached. */
-    fun loginShellCommand(command: String): List<String> = when {
-        isWindows -> listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/c", command)
-        else -> listOf(System.getenv("SHELL") ?: "/bin/bash", "-l", "-c", command)
-    }
-
     fun shellRunning(command: String?): List<String> {
         if (command.isNullOrBlank()) return defaultShell()
         if (isWindows) return listOf(System.getenv("COMSPEC") ?: "cmd.exe", "/k", command)
-        val shell = System.getenv("SHELL") ?: "/bin/bash"
-        return listOf(shell, "-l", "-c", "$command; exec '$shell' -l")
+        val shell = userShell
+        return listOf(shell) + LOGIN_INTERACTIVE + "$command; exec '$shell' -l"
     }
 
     fun defaultShell(): List<String> = when {
         isWindows -> listOf(System.getenv("COMSPEC") ?: "cmd.exe")
         else -> {
-            val shell = System.getenv("SHELL") ?: "/bin/bash"
+            val shell = userShell
             // A login shell picks up the user's PATH, aliases and prompt, matching a normal terminal.
             listOf(shell, "--login")
         }
