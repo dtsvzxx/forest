@@ -99,7 +99,7 @@ fun ChangesPane(
         )
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Column(Modifier.fillMaxSize()) {
-                state.diff?.let { DiffHeader(it) }
+                state.diff?.let { DiffHeader(it, state) }
                 DiffView(
                     diff = state.diff,
                     loading = state.diffLoading,
@@ -413,14 +413,14 @@ internal fun FileDiffRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit)
 }
 
 @Composable
-internal fun DiffHeader(diff: FileDiff) {
+internal fun DiffHeader(diff: FileDiff, state: AppState? = null) {
     val colors = LocalWorktreeColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(28.dp)
             .background(colors.panel)
-            .padding(horizontal = 12.dp),
+            .padding(start = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -433,7 +433,33 @@ internal fun DiffHeader(diff: FileDiff) {
             modifier = Modifier.weight(1f),
         )
         DiffStat(diff)
+        // Absent where there is no state to ask — a header rendered on its own in a test.
+        state?.let { WholeFileToggle(it) }
     }
+}
+
+/**
+ * Switches the diff between the changed lines and the whole file.
+ *
+ * Three lines of context answers "what changed" and not "what does this look like now", which is
+ * the question you have as soon as the change is more than a typo. It lives in the header rather
+ * than in a pane's toolbar because it belongs to the diff being read, and one of these serves all
+ * three places a diff is shown.
+ */
+@Composable
+private fun WholeFileToggle(state: AppState) {
+    val colors = LocalWorktreeColors.current
+    ToolButton(
+        icon = IconKind.EXPAND,
+        tooltip = if (state.wholeFileDiff) {
+            "Showing the whole file — click for just the changes"
+        } else {
+            "Show the whole file, not only the changed lines"
+        },
+        detail = if (state.wholeFileDiff) "git diff -U3" else "git diff -U1000000",
+        onClick = { state.showWholeFile(!state.wholeFileDiff) },
+        tint = if (state.wholeFileDiff) colors.accent else colors.textDim,
+    )
 }
 
 /** How much of the changes pane the file list may take when the pane gets short. */

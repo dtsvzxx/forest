@@ -157,6 +157,21 @@ class AppState(
 
     var diffMode by mutableStateOf(DiffMode.WORKING_TREE)
         private set
+
+    /**
+     * Whether a diff shows the whole file rather than the changed lines and a little around them.
+     *
+     * Three lines of context answers "what changed"; it does not answer "what does this function
+     * look like now", which is the question you have as soon as the change is more than a typo.
+     * git can answer both — the context is a number on the command line — so this is a request for
+     * a wider one rather than a different view, and everything downstream is unchanged.
+     *
+     * Kept on the state rather than in a pane so the choice follows you: turned on to read one
+     * file, it is still on for the next one and for a commit in the Log tab.
+     */
+    var wholeFileDiff by mutableStateOf(false)
+        private set
+
     var baseRef by mutableStateOf<String?>(null)
         private set
 
@@ -609,18 +624,58 @@ class AppState(
             loadConflict(file.path)
             return
         }
+        loadFileDiff(dir, file)
+    }
+
+    private suspend fun loadFileDiff(dir: String, file: ChangedFile) {
         diffLoading = true
         diff = try {
             when {
                 file.untracked -> git.diffUntracked(dir, file.path).firstOrNull()
-                file.staged && !file.unstaged -> git.diff(dir, staged = true, path = file.path).firstOrNull()
-                else -> git.diff(dir, staged = false, path = file.path).firstOrNull()
-                    ?: git.diff(dir, staged = true, path = file.path).firstOrNull()
+                file.staged && !file.unstaged ->
+                    git.diff(dir, staged = true, path = file.path, contextLines = diffContext).firstOrNull()
+                else ->
+                    git.diff(dir, staged = false, path = file.path, contextLines = diffContext).firstOrNull()
+                        ?: git.diff(dir, staged = true, path = file.path, contextLines = diffContext).firstOrNull()
             }
         } finally {
             diffLoading = false
         }
     }
+
+    /**
+     * Switches between the changed lines and the whole file, and re-reads what is on screen.
+     *
+     * Every diff has to be asked for again, because the context is decided by git rather than by
+     * us — there is no wider version of a patch already in hand. Only what is actually loaded is
+     * re-read, so turning this on while looking at a working-tree file does not go and fetch a
+     * commit nobody is looking at.
+     */
+    fun showWholeFile(on: Boolean) = run(null) {
+        if (on == wholeFileDiff) return@run
+        wholeFileDiff = on
+        val dir = selectedWorktree?.path ?: return@run
+
+        selectedFile?.let { loadFileDiff(dir, it) }
+        if (diffMode == DiffMode.AGAINST_BASE) loadRangeDiff()
+        selectedCommit?.let { commit ->
+            val showing = commitFile?.path
+            commitFiles = git.commitDiff(dir, commit.hash, contextLines = diffContext)
+            commitFile = commitFiles.firstOrNull { it.path == showing } ?: commitFiles.firstOrNull()
+        }
+        val commit = fileCommit
+        val path = searchFile
+        if (commit != null && path != null) loadFileDiff(dir, commit, path)
+    }
+
+    /**
+     * How much of the file to ask git for.
+     *
+     * A number rather than a flag because that is what git takes, and one large enough that no file
+     * anybody reads in a pane has more lines than it — `git diff -U` has no "everything" and this
+     * is what every tool that offers the option passes.
+     */
+    private val diffContext: Int get() = if (wholeFileDiff) WHOLE_FILE_CONTEXT else 3
 
     fun selectRangeFile(fileDiff: FileDiff) {
         selectedFile = null
@@ -642,7 +697,7 @@ class AppState(
         commitFile = null
         commitDiffLoading = true
         commitFiles = try {
-            git.commitDiff(dir, commit.hash)
+            git.commitDiff(dir, commit.hash, contextLines = diffContext)
         } finally {
             commitDiffLoading = false
         }
@@ -763,7 +818,7 @@ class AppState(
         fileCommit = commit
         fileDiffLoading = true
         fileDiff = try {
-            git.commitFileDiff(dir, commit.hash, path)
+            git.commitFileDiff(dir, commit.hash, path, contextLines = diffContext)
         } finally {
             fileDiffLoading = false
         }
@@ -797,7 +852,7 @@ class AppState(
         val base = baseRef ?: return
         diffLoading = true
         rangeDiffs = try {
-            git.diffRange(dir, base, "HEAD")
+            git.diffRange(dir, base, "HEAD", contextLines = diffContext)
         } finally {
             diffLoading = false
         }
@@ -1498,6 +1553,9 @@ class AppState(
         const val MAX_SEARCH_RESULTS = 300
 
         const val MAX_PARALLEL_STATUS = 8
+
+        /** Past any file anybody opens in a pane, which is how `-U` is asked for "all of it". */
+        const val WHOLE_FILE_CONTEXT = 1_000_000
 
 
     }

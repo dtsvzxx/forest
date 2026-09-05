@@ -101,7 +101,7 @@ fun LogPane(state: AppState, modifier: Modifier = Modifier) {
                 color = colors.separator,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                state.commitFile?.let { DiffHeader(it) }
+                state.commitFile?.let { DiffHeader(it, state) }
                 DiffView(
                     diff = state.commitFile,
                     loading = state.commitDiffLoading,

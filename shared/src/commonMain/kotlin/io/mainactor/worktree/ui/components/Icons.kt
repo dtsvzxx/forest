@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -54,6 +54,15 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
+        // Two arrowheads pushing apart: more of the file above and more of it below.
+        IconKind.EXPAND -> {
+            line(0.5f, 0.14f, 0.5f, 0.42f)
+            line(0.34f, 0.28f, 0.5f, 0.14f)
+            line(0.66f, 0.28f, 0.5f, 0.14f)
+            line(0.5f, 0.58f, 0.5f, 0.86f)
+            line(0.34f, 0.72f, 0.5f, 0.86f)
+            line(0.66f, 0.72f, 0.5f, 0.86f)
+        }
         // Sliders rather than a cogwheel: at 14dp a cogwheel's teeth are one pixel of mush.
         IconKind.SETTINGS -> {
             listOf(0.28f to 0.62f, 0.5f to 0.36f, 0.72f to 0.7f).forEach { (y, knob) ->

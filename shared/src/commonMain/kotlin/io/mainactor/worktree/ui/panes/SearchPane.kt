@@ -100,7 +100,7 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
                 color = colors.separator,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                state.fileDiff?.let { DiffHeader(it) }
+                state.fileDiff?.let { DiffHeader(it, state) }
                 DiffView(
                     diff = state.fileDiff,
                     loading = state.fileDiffLoading,

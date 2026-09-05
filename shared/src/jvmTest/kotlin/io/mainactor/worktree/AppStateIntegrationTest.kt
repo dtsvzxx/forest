@@ -805,6 +805,42 @@ class AppStateIntegrationTest {
         )
     }
 
+    /**
+     * Three lines of context answers "what changed" and not "what does this look like now" — so
+     * the whole file has to be available, and it comes from git rather than from a wider view of a
+     * patch already in hand.
+     */
+    @Test
+    fun `a diff can be widened to the whole file`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+
+        // Twenty lines, of which one changes: with three lines of context most of it is unseen.
+        val file = File(mainRepo, "long.txt")
+        file.writeText((1..20).joinToString("\n") { "line $it" })
+        git.run(mainRepo.path, "add", "long.txt")
+        git.commit(mainRepo.path, "add a long file")
+        file.writeText((1..20).joinToString("\n") { if (it == 10) "changed" else "line $it" })
+
+        state.openProject(mainRepo.path).join()
+        val changed = state.status.unstaged.single { it.path == "long.txt" }
+        state.selectFile(changed).join()
+
+        val narrow = state.diff!!.hunks.sumOf { it.lines.size }
+        assertTrue(narrow < 12, "three lines of context should show a fraction of the file, saw $narrow")
+
+        state.showWholeFile(true).join()
+
+        val wide = state.diff!!.hunks.sumOf { it.lines.size }
+        assertTrue(wide >= 21, "the whole file should be there, saw $wide lines")
+        assertTrue(state.wholeFileDiff)
+
+        // And back, without having to reselect the file.
+        state.showWholeFile(false).join()
+        assertEquals(narrow, state.diff!!.hunks.sumOf { it.lines.size })
+    }
+
     @Test
     fun `picking a remote branch creates a local branch that tracks it`() = runBlocking {
         if (!gitAvailable) return@runBlocking
