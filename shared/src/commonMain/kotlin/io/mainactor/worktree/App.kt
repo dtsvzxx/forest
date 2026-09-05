@@ -235,15 +235,9 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
     val conflicts = state.status.conflicts.size
 
     Column(modifier.fillMaxHeight().background(colors.panel)) {
-        TabStrip(
-            trailing = {
-                ToolButton(
-                    icon = IconKind.TERMINAL,
-                    tooltip = if (state.terminalVisible) "Hide the terminal" else "Show the terminal",
-                    onClick = state::toggleTerminal,
-                )
-            },
-        ) {
+        // No terminal button here: this strip switches what the pane shows, and the terminal is
+        // not one of its tabs. The toolbar's own button is the one control that opens it.
+        TabStrip {
             IdeTab("Changes", state.rightTab == RightTab.CHANGES, { state.rightTab = RightTab.CHANGES })
             IdeTab(
                 text = "Conflicts",

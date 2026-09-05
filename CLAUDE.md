@@ -198,6 +198,15 @@ tests and the other platforms are untouched.
 - A press consumed by a button inside the toolbar never reaches `Modifier.windowHandle`, which is
   what keeps the controls clickable and leaves only the bar's own background dragging the window.
 
+**One control opens the terminal**, the toolbar's own button, and it opens a shell in the selected
+worktree when there is none (`the terminal button opens the first shell and then only hides it`).
+There were three, all drawn with the same glyph: this one, one on the right pane's tab strip calling
+the identical action, and one in the Worktrees header. A row of near-identical icons is worse than a
+single obvious one, and the two that went were the two that had no business being there — that tab
+strip switches what the pane shows, and the terminal is not one of its tabs. Opening a shell in a
+*particular* worktree stayed on that worktree's context menu, and the tool window keeps its own
+tab `+` and hide `−`, which are window controls rather than another way in.
+
 Every `ToolButton` carries a `tooltip`, and the git-driven ones a `detail` holding the exact command
 they run — at 14dp an icon does not say what `git worktree prune` will do, and the Console tab's
 "nothing is hidden" promise is worth applying to the buttons too. `Tooltip` wraps Compose Desktop's

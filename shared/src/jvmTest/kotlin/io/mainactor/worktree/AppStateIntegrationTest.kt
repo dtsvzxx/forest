@@ -1079,6 +1079,38 @@ class AppStateIntegrationTest {
         assertTrue(state.agents.isEmpty(), "entering the agent wall started an agent")
     }
 
+    /**
+     * The single terminal button has to be able to start the first shell.
+     *
+     * There used to be three controls drawn with the terminal glyph, and one of them existed
+     * purely to open a shell in the selected worktree. Now that only the toolbar's toggle is left,
+     * "show the terminal" has to mean "and open one if there is none" — otherwise the button that
+     * remains opens an empty tool window.
+     */
+    @Test
+    fun `the terminal button opens the first shell and then only hides it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val disposed = mutableListOf<String>()
+        val state = newState(onTerminalDisposed = { disposed += it })
+        state.openProject(mainRepo.path).join()
+
+        state.toggleTerminal()
+
+        assertTrue(state.terminalVisible)
+        val shell = state.terminals.single()
+        assertEquals(mainRepo.canonicalPath, shell.workDir)
+
+        // Hiding leaves the shell running: a build in there must survive the panel being closed.
+        state.toggleTerminal()
+        assertFalse(state.terminalVisible)
+        assertEquals(listOf(shell), state.terminals)
+        assertTrue(disposed.isEmpty(), "hiding the terminal must not end its shell")
+
+        // And showing it again reattaches rather than opening a second one.
+        state.toggleTerminal()
+        assertEquals(listOf(shell), state.terminals)
+    }
+
     @Test
     fun `an agent can take you to its worktree in the project view`() = runBlocking {
         if (!gitAvailable) return@runBlocking

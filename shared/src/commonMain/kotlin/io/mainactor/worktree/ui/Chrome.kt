@@ -146,9 +146,17 @@ fun MainToolbar(
             enabled = gitActionsEnabled,
         )
         Divider()
+        // The only button that opens the terminal. There were three of these, all drawn with the
+        // same glyph — one here, one on the right pane's tab strip calling the identical action,
+        // and one in the Worktrees header — and a row of identical icons that do nearly the same
+        // thing is worse than one that does the obvious thing. Opening a shell in a *particular*
+        // worktree stayed where it belongs, on that worktree's own context menu.
         ToolButton(
             icon = IconKind.TERMINAL,
-            tooltip = if (state.terminalVisible) "Hide the terminal" else "Show the terminal",
+            tooltip = when {
+                state.terminalVisible -> "Hide the terminal — running shells keep going"
+                else -> "Show the terminal, opening a shell in the selected worktree if none is"
+            },
             onClick = state::toggleTerminal,
             enabled = hasWorktree && state.mode == AppMode.PROJECT,
         )

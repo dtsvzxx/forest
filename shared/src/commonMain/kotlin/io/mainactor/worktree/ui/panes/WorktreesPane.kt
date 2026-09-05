@@ -102,12 +102,6 @@ fun WorktreesPane(
                 enabled = selected != null && !selected.isBare,
             )
             ToolButton(
-                icon = IconKind.TERMINAL,
-                tooltip = "Open a shell in the selected worktree",
-                onClick = { selected?.let { state.openTerminal(it) } },
-                enabled = selected != null,
-            )
-            ToolButton(
                 icon = IconKind.LOCK,
                 tooltip = if (selected?.isLocked == true) {
                     "Unlock — allow this worktree to be pruned again"
