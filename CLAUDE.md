@@ -726,9 +726,10 @@ what Apple's own instructions describe. The image gets a ticket of its own at th
 covers the app while it is inside the image; it stops covering it the moment someone drags the app
 to /Applications, because a bundle carries only what is stapled to *it*. Staple the bundle after
 the image is built and the copy inside the image is the unstapled one, which is why `packageDmg`
-depends on `notarizeApp` rather than the other way round. Verified on 1.2.0 before the step
-existed: `stapler validate` on the app inside a stapled image answered "does not have a ticket
-stapled to it".
+depends on `notarizeApp` rather than the other way round. Verified both ways: on 1.2.0, before the
+step existed, `stapler validate` on the app inside a stapled image answered "does not have a ticket
+stapled to it"; on 1.3.0, the first release to run it, the same command on the same place answered
+"The validate action worked!".
 
 Signing is verified working: full Developer ID chain, secure timestamp, `flags=0x10000(runtime)`,
 `codesign --verify --deep --strict` clean, and the signed hardened-runtime build starts under a
