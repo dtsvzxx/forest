@@ -774,34 +774,42 @@ several can be in flight in different worktrees at once, which is why `backgroun
 the status bar shows the first with a count. The refresh afterwards goes through `refresh()` so it
 takes the lock like every other one.
 
-## Notes
+## Tasks
 
-The Notes tab is a per-project scratchpad for ideas **written as prompts**, and its other half is on
-the agent wall: a pane's header carries a note button, the picker lists the project's notes, and the
-chosen one is handed to the running agent as if it had been pasted and submitted. Writing an idea
+The Tasks tab is a per-project list of work **written as prompts**, and its other half is on the
+agent wall: a pane's header carries a task button, the picker lists what is still open, and the
+chosen task is handed to the running agent as if it had been pasted and submitted. Writing something
 down is only worth doing because using it later costs one click.
 
-That button appears **only once the project has a note**, and the context menu keeps the entry
-either way — a button whose every press could say no more than "nothing written down yet" is
-furniture on the header of everyone who does not keep notes, while the menu is where the feature can
-still announce itself. `a pane header sends a note without going through the context menu` drives a
-real click at it.
-
-- **A note has no title.** Its first non-blank line is the name and the second is the preview
-  (`model/Note.kt`) — naming a thought is a second job, and nobody does it when the thought is the
-  point. An empty note reads "Empty note" rather than showing a blank row, and `sendNote` refuses
-  to send one.
-- **There is no save button.** `updateNote` writes the file on every keystroke; a scratchpad with a
-  dirty state is a scratchpad people stop using, and the file is a few kilobytes.
-- **Ids count up (`noteSeq`), they are not derived from the list.** An id built from `notes.size`
-  hands a new note the id of one still in the list as soon as anything was deleted from the middle,
-  and the editor writes through the id — two notes with one id are edited as one. Pinned by `a note
+- **`done` is the whole of the state, and nothing sets it but the person.** Sending a task to an
+  agent is not progress: the pane may finish it, fail at it or be closed on it, and none of that is
+  visible from here. A tracker that guessed would be wrong in exactly the cases that matter, so it
+  records the one thing only the user knows and asks for it once.
+- **A task has no title.** Its first non-blank line is the name and the second is the preview
+  (`model/Task.kt`) — naming a piece of work is a second job, and nobody does it when the work is
+  the point. `isOpen` is "written down and not finished", which is what the wall offers and what
+  the badge counts.
+- **Finished tasks sink, they do not vanish.** `AppState.order` puts open first and newest within
+  each half; a tracker that hides what was done cannot answer "did I do that already". The row is
+  dimmed *and* struck through, because colour alone is what a colour-blind reader cannot use and
+  also what a selected row's own background takes away.
+- **The list is not reordered while you type.** `updateTask` leaves the row where it is even though
+  the task just became the newest — a row that climbs to the top between two keystrokes takes the
+  caret with it. It sorts into place the next time the project is opened.
+- **There is no save button.** `updateTask` writes the file on every keystroke; a list with a dirty
+  state is a list people stop using, and the file is a few kilobytes.
+- **Ids count up (`taskSeq`), they are not derived from the list.** An id built from `tasks.size`
+  hands a new task the id of one still in the list as soon as anything was deleted from the middle,
+  and the editor writes through the id — two tasks with one id are edited as one. Pinned by `a task
   added after a deletion does not collide with a surviving one`, which stops the clock to reach the
   case at all.
-- Storage is `~/.worktree/notes.json`, keyed by project path, JSON for the same reason
+- Storage is `~/.worktree/tasks.json`, keyed by project path, JSON for the same reason
   `agents.json` is: a prompt is many lines of arbitrary text, which no line-per-entry format holds.
-  It sits beside the machine's other preferences rather than in the repository — a half-formed
-  thought is not something to put in front of everyone who clones it.
+  It sits beside the machine's other preferences rather than in the repository — a working list is
+  not something to put in front of everyone who clones it, nor into the diffs and merge conflicts
+  that living in a worktree would cost it. **`notes.json` is read when there is no `tasks.json`
+  yet** and never written back: the tab was called Notes for one release, the entries are the same
+  shape, and leaving the old file where it is costs kilobytes.
 
 **Delivery is the backend's business, not `AppState`'s.** `AppState` calls `onSendPrompt(sessionId,
 text)`, which `main.kt` binds to `TerminalBackend.sendPrompt`; only the engine knows whether the
@@ -810,6 +818,12 @@ runs the rest as separate commands. Both engines implement it — the native one
 `KeyEncoder.paste`, JediTerm by wrapping the text itself, which is why `ChromelessTerminalWidget`
 subclasses `TerminalPanel` purely to record whether mode 2004 is on. `a prompt reaches the engine
 that owns the pane` covers the router.
+
+The header button appears **only while something is open**, and the context menu keeps its entry
+either way — a button whose every press could say no more than "nothing on the list" is furniture on
+the header of everyone who does not keep one, while the menu is where the feature can still announce
+itself. `a pane header sends a task without going through the context menu` drives a real click at
+it.
 
 ## Usage statistics
 
@@ -884,8 +898,8 @@ history shaped like a real shared repository — long refs, merge subjects and e
 hashes, the size at which the hash column used to wrap onto a second, clipped line),
 `app-render-search` (a file's history), `app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
 delay, since `TooltipArea` counts wall-clock time rather than frames), `app-render-splitter`,
-`app-render-notes` (the Notes tab, two notes and the editor) and `app-render-send-note` (the
-picker that hands one to an agent).
+`app-render-tasks` (the Tasks tab, two open tasks, one finished, and the editor),
+`app-render-agent-task` and `app-render-send-task` (the picker that hands one to an agent).
 Two tests drive real pointer press/move/release sequences over the dividers and assert the pane
 boundary moved; they are what caught the frozen splitters. A third renders the same state into two
 differently sized windows and asserts the dividers land in identical places — the guard against

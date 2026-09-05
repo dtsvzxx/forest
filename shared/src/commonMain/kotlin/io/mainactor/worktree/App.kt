@@ -20,7 +20,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import io.mainactor.worktree.model.Note
+import io.mainactor.worktree.model.Task
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.model.Worktree
 import io.mainactor.worktree.ui.MainToolbar
@@ -45,14 +45,14 @@ import io.mainactor.worktree.ui.dialogs.RenameWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.RebaseDialog
 import io.mainactor.worktree.ui.dialogs.RemoveWorktreeDialog
-import io.mainactor.worktree.ui.dialogs.SendNoteDialog
+import io.mainactor.worktree.ui.dialogs.SendTaskDialog
 import io.mainactor.worktree.ui.dialogs.SwitchBranchDialog
 import io.mainactor.worktree.ui.panes.AgentsPane
 import io.mainactor.worktree.ui.panes.ChangesPane
 import io.mainactor.worktree.ui.panes.ConflictsPane
 import io.mainactor.worktree.ui.panes.ConsolePane
 import io.mainactor.worktree.ui.panes.LogPane
-import io.mainactor.worktree.ui.panes.NotesPane
+import io.mainactor.worktree.ui.panes.TasksPane
 import io.mainactor.worktree.ui.panes.SearchPane
 import io.mainactor.worktree.ui.panes.ProjectsPane
 import io.mainactor.worktree.ui.panes.WorktreesPane
@@ -70,7 +70,7 @@ private sealed interface Dialog {
     data class SwitchBranch(val worktree: Worktree) : Dialog
     data class RenameWorktree(val worktree: Worktree) : Dialog
     data class NewAgent(val axis: SplitAxis?) : Dialog
-    data class SendNote(val sessionId: String) : Dialog
+    data class SendTask(val sessionId: String) : Dialog
     data object AgentSettings : Dialog
 }
 
@@ -107,8 +107,8 @@ fun App(
             }
         }
 
-        LaunchedEffect(state.noteRequest) {
-            state.noteRequest?.let { sessionId -> dialog = Dialog.SendNote(sessionId) }
+        LaunchedEffect(state.taskRequest) {
+            state.taskRequest?.let { sessionId -> dialog = Dialog.SendTask(sessionId) }
         }
 
         Column(Modifier.fillMaxSize().background(colors.editor)) {
@@ -253,7 +253,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
             )
             IdeTab("Log", state.rightTab == RightTab.LOG, { state.rightTab = RightTab.LOG })
             IdeTab("Search", state.rightTab == RightTab.SEARCH, { state.rightTab = RightTab.SEARCH })
-            IdeTab("Notes", state.rightTab == RightTab.NOTES, { state.rightTab = RightTab.NOTES })
+            IdeTab("Tasks", state.rightTab == RightTab.TASKS, { state.rightTab = RightTab.TASKS })
             IdeTab("Console", state.rightTab == RightTab.CONSOLE, { state.rightTab = RightTab.CONSOLE })
         }
         HorizontalDivider()
@@ -268,7 +268,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
                     RightTab.CONFLICTS -> ConflictsPane(state)
                     RightTab.LOG -> LogPane(state)
                     RightTab.SEARCH -> SearchPane(state)
-                    RightTab.NOTES -> NotesPane(state)
+                    RightTab.TASKS -> TasksPane(state)
                     RightTab.CONSOLE -> ConsolePane(state)
                 }
             }
@@ -396,12 +396,14 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
             },
         )
 
-        is Dialog.SendNote -> SendNoteDialog(
-            notes = state.notes,
-            onDismiss = { onDismiss(); state.clearNoteRequest() },
-            onSend = { note ->
+        is Dialog.SendTask -> SendTaskDialog(
+            // Only what is left to do. A finished task is not something anyone means to send
+            // again, and the list an agent picker shows should be the list of work.
+            tasks = state.openTasks,
+            onDismiss = { onDismiss(); state.clearTaskRequest() },
+            onSend = { task ->
                 onDismiss()
-                state.sendNote(dialog.sessionId, note)
+                state.sendTask(dialog.sessionId, task)
             },
         )
 

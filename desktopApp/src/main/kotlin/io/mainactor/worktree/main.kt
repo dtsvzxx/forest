@@ -207,7 +207,7 @@ private fun rememberAppState(terminals: TerminalBackend): AppState {
             chooser = SwingDirectoryChooser(),
             shell = JvmShellRunner(),
             highlighter = TreeSitterHighlighter(),
-            // How a note reaches an agent. `:shared` knows what a note is and nothing about
+            // How a task reaches an agent. `:shared` knows what a task is and nothing about
             // terminals; the backend knows the opposite.
             onSendPrompt = terminals::sendPrompt,
             system = DesktopSystemIntegration(),

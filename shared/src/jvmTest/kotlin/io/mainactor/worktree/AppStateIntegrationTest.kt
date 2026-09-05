@@ -160,28 +160,28 @@ class AppStateIntegrationTest {
     fun `a search result opens the commits that touched that file`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
-        File(mainRepo, "notes.md").writeText("first\n")
+        File(mainRepo, "tasks.md").writeText("first\n")
         git.stageAll(mainRepo.path)
-        git.commit(mainRepo.path, "add notes")
-        File(mainRepo, "notes.md").writeText("first\nsecond\n")
+        git.commit(mainRepo.path, "add tasks")
+        File(mainRepo, "tasks.md").writeText("first\nsecond\n")
         git.stageAll(mainRepo.path)
-        git.commit(mainRepo.path, "extend notes")
+        git.commit(mainRepo.path, "extend tasks")
         val state = newState()
         state.openProject(mainRepo.path).join()
-        state.search("notes")
+        state.search("tasks")
         state.searchIndexJob?.join()
 
-        state.selectSearchFile("notes.md").join()
+        state.selectSearchFile("tasks.md").join()
 
         // Newest first, and nothing that only touched file.txt.
-        assertEquals(listOf("extend notes", "add notes"), state.fileCommits.map { it.subject })
+        assertEquals(listOf("extend tasks", "add tasks"), state.fileCommits.map { it.subject })
         // The newest commit is opened for the user, with that file's patch and no other's.
-        assertEquals("extend notes", state.fileCommit?.subject)
-        assertEquals("notes.md", state.fileDiff?.path)
+        assertEquals("extend tasks", state.fileCommit?.subject)
+        assertEquals("tasks.md", state.fileDiff?.path)
         assertEquals(1, state.fileDiff?.added)
 
         state.selectFileCommit(state.fileCommits.last()).join()
-        assertEquals("notes.md", state.fileDiff?.path)
+        assertEquals("tasks.md", state.fileDiff?.path)
     }
 
     @Test
@@ -1433,110 +1433,175 @@ class AppStateIntegrationTest {
     }
 
     @Test
-    fun `notes are kept per project and survive reopening it`() = runBlocking {
+    fun `tasks are kept per project and survive reopening it`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val other = newRepository("other-repo")
         val state = newState()
         state.openProject(mainRepo.path).join()
 
-        state.addNote()
-        state.updateNote(state.selectedNote!!, "Rewrite the pty layer using FFM.")
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "Rewrite the pty layer using FFM.")
 
-        // A different project starts empty: notes belong to the repository they were thought about.
+        // A different project starts empty: tasks belong to the repository they were thought about.
         state.openProject(other.path).join()
-        assertTrue(state.notes.isEmpty())
+        assertTrue(state.tasks.isEmpty())
 
         state.openProject(mainRepo.path).join()
-        assertEquals(listOf("Rewrite the pty layer using FFM."), state.notes.map { it.body })
+        assertEquals(listOf("Rewrite the pty layer using FFM."), state.tasks.map { it.body })
 
         // And a fresh window reads them off disk rather than out of this one's memory.
         val reopened = newState()
         reopened.openProject(mainRepo.path).join()
-        assertEquals(listOf("Rewrite the pty layer using FFM."), reopened.notes.map { it.body })
+        assertEquals(listOf("Rewrite the pty layer using FFM."), reopened.tasks.map { it.body })
     }
 
     /**
-     * Ids are what the editor writes through, so two live notes may never share one.
+     * Ids are what the editor writes through, so two live tasks may never share one.
      *
      * The case is a deletion from the middle of the list: an id derived from the list's length
-     * hands the next note the id of one still in it, and typing into either then edits both.
+     * hands the next task the id of one still in it, and typing into either then edits both.
      */
     @Test
-    fun `a note added after a deletion does not collide with a surviving one`() = runBlocking {
+    fun `a task added after a deletion does not collide with a surviving one`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val state = newState(now = { 1_700_000_000_000 })
         state.openProject(mainRepo.path).join()
 
-        state.addNote()
-        val doomed = state.selectedNote!!
-        state.addNote()
-        val survivor = state.selectedNote!!
-        state.updateNote(survivor, "keep me")
-        state.deleteNote(doomed)
+        state.addTask()
+        val doomed = state.selectedTask!!
+        state.addTask()
+        val survivor = state.selectedTask!!
+        state.updateTask(survivor, "keep me")
+        state.deleteTask(doomed)
 
-        state.addNote()
-        state.updateNote(state.selectedNote!!, "fresh")
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "fresh")
 
-        assertEquals(2, state.notes.map { it.id }.toSet().size)
-        assertEquals("keep me", state.notes.single { it.id == survivor }.body)
+        assertEquals(2, state.tasks.map { it.id }.toSet().size)
+        assertEquals("keep me", state.tasks.single { it.id == survivor }.body)
     }
 
+    /**
+     * The one piece of state a task has, and the one thing nothing sets on its own.
+     *
+     * Handing a task to an agent is not progress: the pane may finish it, fail at it or be closed
+     * on it, and none of that is visible from here.
+     */
     @Test
-    fun `deleting a note selects another one rather than nothing`() = runBlocking {
+    fun `a finished task sinks below the open ones and stops being offered`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val state = newState()
         state.openProject(mainRepo.path).join()
 
-        state.addNote()
-        state.updateNote(state.selectedNote!!, "first")
-        val first = state.selectedNote!!
-        state.addNote()
-        state.updateNote(state.selectedNote!!, "second")
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "first")
+        val first = state.selectedTask!!
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "second")
 
-        state.deleteNote(state.selectedNote!!)
+        state.toggleTaskDone(first)
 
-        assertEquals(first, state.selectedNote)
-        assertEquals(listOf("first"), state.notes.map { it.body })
+        assertEquals(listOf("second", "first"), state.tasks.map { it.body })
+        assertEquals(listOf("second"), state.openTasks.map { it.body })
 
-        state.deleteNote(first)
-        assertNull(state.selectedNote)
-        assertTrue(state.notes.isEmpty())
+        // And back: a task ticked off by mistake is one click from being on the list again.
+        state.toggleTaskDone(first)
+        assertEquals(listOf("second", "first"), state.openTasks.map { it.body })
+    }
+
+    @Test
+    fun `finishing a task survives reopening the project`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "ship the release")
+        state.toggleTaskDone(state.selectedTask!!)
+
+        val reopened = newState()
+        reopened.openProject(mainRepo.path).join()
+
+        assertEquals(listOf(true), reopened.tasks.map { it.done })
+        assertTrue(reopened.openTasks.isEmpty())
+    }
+
+    /** The tab was called Notes for one release, and nobody should lose what they wrote in it. */
+    @Test
+    fun `a note written before the tracker existed opens as a task`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        File(homeDir, ".worktree").mkdirs()
+        File(homeDir, ".worktree/notes.json").writeText(
+            """{"${mainRepo.canonicalPath}":[{"id":"note-1","body":"Rewrite the pty layer","updatedAt":7}]}""",
+        )
+
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+
+        assertEquals(listOf("Rewrite the pty layer"), state.tasks.map { it.body })
+        assertEquals(listOf(false), state.tasks.map { it.done })
+
+        // The first write goes to the new name, and the old file is left where it was.
+        state.toggleTaskDone(state.tasks.single().id)
+        assertTrue(File(homeDir, ".worktree/tasks.json").readText().contains("Rewrite the pty layer"))
+        assertTrue(File(homeDir, ".worktree/notes.json").exists())
+    }
+
+    @Test
+    fun `deleting a task selects another one rather than nothing`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "first")
+        val first = state.selectedTask!!
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "second")
+
+        state.deleteTask(state.selectedTask!!)
+
+        assertEquals(first, state.selectedTask)
+        assertEquals(listOf("first"), state.tasks.map { it.body })
+
+        state.deleteTask(first)
+        assertNull(state.selectedTask)
+        assertTrue(state.tasks.isEmpty())
     }
 
     /**
-     * The half that makes writing a note worth doing: it reaches a running agent as a prompt.
+     * The half that makes writing a task worth doing: it reaches a running agent as a prompt.
      *
      * [AppState] knows nothing about terminals, so what is asserted here is the whole of its side
-     * of the contract — the session it was asked for, and the note's text.
+     * of the contract — the session it was asked for, and the task's text.
      */
     @Test
-    fun `sending a note hands its body to the pane that asked for it`() = runBlocking {
+    fun `sending a task hands its body to the pane that asked for it`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val sent = mutableListOf<Pair<String, String>>()
         val state = newState(onSendPrompt = { id, text -> sent += id to text })
         state.openProject(mainRepo.path).join()
 
-        state.addNote()
-        state.updateNote(state.selectedNote!!, "  Add a --dry-run flag.\nExplain it in the README.  ")
+        state.addTask()
+        state.updateTask(state.selectedTask!!, "  Add a --dry-run flag.\nExplain it in the README.  ")
 
-        state.requestNote("pane-1")
-        assertEquals("pane-1", state.noteRequest)
+        state.requestTask("pane-1")
+        assertEquals("pane-1", state.taskRequest)
 
-        state.sendNote("pane-1", state.notes.single())
+        state.sendTask("pane-1", state.tasks.single())
 
         assertEquals(listOf("pane-1" to "Add a --dry-run flag.\nExplain it in the README."), sent)
-        assertNull(state.noteRequest)
+        assertNull(state.taskRequest)
     }
 
     @Test
-    fun `an empty note is not sent`() = runBlocking {
+    fun `an empty task is not sent`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val sent = mutableListOf<Pair<String, String>>()
         val state = newState(onSendPrompt = { id, text -> sent += id to text })
         state.openProject(mainRepo.path).join()
-        state.addNote()
+        state.addTask()
 
-        state.sendNote("pane-1", state.notes.single())
+        state.sendTask("pane-1", state.tasks.single())
 
         assertTrue(sent.isEmpty())
     }

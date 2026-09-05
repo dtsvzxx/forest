@@ -9,7 +9,7 @@ import io.mainactor.worktree.git.GitLogEntry
 import io.mainactor.worktree.git.GitParsers
 import io.mainactor.worktree.git.WorktreeActivity
 import io.mainactor.worktree.model.Branch
-import io.mainactor.worktree.model.Note
+import io.mainactor.worktree.model.Task
 import io.mainactor.worktree.model.ChangedFile
 import io.mainactor.worktree.model.CommitInfo
 import io.mainactor.worktree.model.ConflictSegment
@@ -61,7 +61,7 @@ enum class DiffMode {
     AGAINST_BASE,
 }
 
-enum class RightTab { CHANGES, CONFLICTS, LOG, SEARCH, NOTES, CONSOLE }
+enum class RightTab { CHANGES, CONFLICTS, LOG, SEARCH, TASKS, CONSOLE }
 
 /** The two things the window can be: a repository, or a wall of agents working in it. */
 enum class AppMode { PROJECT, AGENTS }
@@ -117,12 +117,12 @@ class AppState(
     private val shell: ShellRunner,
     /** Colours the diff. Injected like every other platform thing; absent in a render test. */
     val highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
-    private val notesStore: NotesStore = NotesStore(fs),
+    private val taskStore: TaskStore = TaskStore(fs),
     /**
      * Hands a prompt to a running pane.
      *
      * A function rather than a dependency on the terminal: `:shared` does not know what a terminal
-     * is, and this is the one thing a note needs from one.
+     * is, and this is the one thing a task needs from one.
      */
     private val onSendPrompt: (sessionId: String, text: String) -> Unit = { _, _ -> },
     val system: SystemIntegration,
@@ -377,7 +377,7 @@ class AppState(
         store.setLastOpened(root)
         projectAgents = agentStore.forProjectOrDefault(root)
         project = projects.first { it.path == root }
-        loadNotes(root)
+        loadTasks(root)
         selectedWorktree = null
         baseRef = null
         diffMode = DiffMode.WORKING_TREE
@@ -1462,90 +1462,115 @@ class AppState(
      * The dialog is App's own state, and the shortcut that triggers it arrives from a global key
      * hook outside the composition, so it travels as a request the window observes and clears.
      */
-    // ---------------------------------------------------------------- notes
+    // ---------------------------------------------------------------- tasks
 
     /**
-     * The ideas written down for the open project, newest first.
+     * The open project's list of work, unfinished first and newest within that.
      *
-     * Newest first because a note is written when the thought arrives and reached for while it is
-     * still warm; a list in the order they were created buries the one you just wrote.
+     * Newest first because a task is written when the thought arrives and reached for while it is
+     * still warm; a list in the order they were created buries the one you just wrote. Finished
+     * ones sink rather than disappear — a tracker that hides what was done cannot answer "did I do
+     * that already", which is half of what one is for.
      */
-    var notes by mutableStateOf<List<Note>>(emptyList())
+    var tasks by mutableStateOf<List<Task>>(emptyList())
         private set
 
-    var selectedNote by mutableStateOf<String?>(null)
+    /** What is left to do, which is what the agent wall offers and what the badge counts. */
+    val openTasks: List<Task> get() = tasks.filter { it.isOpen }
+
+    var selectedTask by mutableStateOf<String?>(null)
         private set
 
     /** A pane waiting to be given a prompt, which the window turns into a picker. */
-    var noteRequest by mutableStateOf<String?>(null)
+    var taskRequest by mutableStateOf<String?>(null)
         private set
 
-    fun selectNote(id: String?) {
-        selectedNote = id
+    fun selectTask(id: String?) {
+        selectedTask = id
     }
 
     /**
-     * Starts a new note and puts the caret in it.
+     * Starts a new task and puts the caret in it.
      *
-     * The id counts up rather than being derived from the list — `notes.size` reuses the id of a
-     * note deleted a moment ago, and two notes with one id are edited as one.
+     * The id counts up rather than being derived from the list — `tasks.size` reuses the id of a
+     * task deleted a moment ago, and two tasks with one id are edited as one.
      */
-    private var noteSeq = 0
+    private var taskSeq = 0
 
-    fun addNote() {
-        val note = Note(id = "note-${fs.now()}-${noteSeq++}", body = "", updatedAt = fs.now())
-        notes = listOf(note) + notes
-        selectedNote = note.id
-        persistNotes()
+    fun addTask() {
+        val task = Task(id = "task-${fs.now()}-${taskSeq++}", body = "", updatedAt = fs.now())
+        tasks = order(listOf(task) + tasks)
+        selectedTask = task.id
+        persistTasks()
     }
 
     /**
      * Saves as you type.
      *
-     * There is no save button and no dirty state, because a scratchpad with either is a scratchpad
-     * people stop using. The file is a few kilobytes and rewriting it costs nothing worth counting.
+     * There is no save button and no dirty state, because a list with either is a list people stop
+     * using. The file is a few kilobytes and rewriting it costs nothing worth counting.
+     *
+     * The list is deliberately *not* reordered here, even though the task just became the newest:
+     * a row that climbs to the top between two keystrokes takes the caret with it. It sorts into
+     * place the next time the project is opened.
      */
-    fun updateNote(id: String, body: String) {
-        notes = notes.map { if (it.id == id) it.copy(body = body, updatedAt = fs.now()) else it }
-        persistNotes()
-    }
-
-    fun deleteNote(id: String) {
-        notes = notes.filterNot { it.id == id }
-        if (selectedNote == id) selectedNote = notes.firstOrNull()?.id
-        persistNotes()
-    }
-
-    /** Asks which note to send to [sessionId]; the window shows the picker. */
-    fun requestNote(sessionId: String) {
-        noteRequest = sessionId
-    }
-
-    fun clearNoteRequest() {
-        noteRequest = null
+    fun updateTask(id: String, body: String) {
+        tasks = tasks.map { if (it.id == id) it.copy(body = body, updatedAt = fs.now()) else it }
+        persistTasks()
     }
 
     /**
-     * Hands a note to a running agent as if it had been pasted and submitted.
+     * Finishes a task, or takes it back.
+     *
+     * Nothing sets this on its own. Handing a task to an agent is not progress — the pane may
+     * finish it, fail at it or be closed on it, and none of that is visible from here — so the one
+     * thing the tracker records is the one thing only the person knows.
+     */
+    fun toggleTaskDone(id: String) {
+        tasks = order(tasks.map { if (it.id == id) it.copy(done = !it.done, updatedAt = fs.now()) else it })
+        persistTasks()
+    }
+
+    fun deleteTask(id: String) {
+        tasks = tasks.filterNot { it.id == id }
+        if (selectedTask == id) selectedTask = tasks.firstOrNull()?.id
+        persistTasks()
+    }
+
+    /** Asks which task to send to [sessionId]; the window shows the picker. */
+    fun requestTask(sessionId: String) {
+        taskRequest = sessionId
+    }
+
+    fun clearTaskRequest() {
+        taskRequest = null
+    }
+
+    /**
+     * Hands a task to a running agent as if it had been pasted and submitted.
      *
      * Pasted rather than typed: a prompt is several lines, and a terminal that receives them as
      * ordinary input submits the first one and runs the rest as separate commands. Whether the
      * agent asked for bracketed paste is the backend's business, because only it knows.
      */
-    fun sendNote(sessionId: String, note: Note) {
-        if (note.isEmpty) return
-        onSendPrompt(sessionId, note.body.trim())
-        noteRequest = null
+    fun sendTask(sessionId: String, task: Task) {
+        if (task.isEmpty) return
+        onSendPrompt(sessionId, task.body.trim())
+        taskRequest = null
     }
 
-    private fun persistNotes() {
+    /** Unfinished first, newest within each half. A stable sort, so equal times keep their order. */
+    private fun order(list: List<Task>): List<Task> =
+        list.sortedWith(compareBy({ it.done }, { -it.updatedAt }))
+
+    private fun persistTasks() {
         val path = project?.path ?: return
-        notesStore.save(notesStore.load() + (path to notes))
+        taskStore.save(taskStore.load() + (path to tasks))
     }
 
-    private fun loadNotes(path: String?) {
-        notes = path?.let { notesStore.load()[it] }.orEmpty().sortedByDescending { it.updatedAt }
-        selectedNote = notes.firstOrNull()?.id
+    private fun loadTasks(path: String?) {
+        tasks = order(path?.let { taskStore.load()[it] }.orEmpty())
+        selectedTask = tasks.firstOrNull()?.id
     }
 
     var agentRequest by mutableStateOf<AgentRequest?>(null)

@@ -41,7 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.mainactor.worktree.model.Note
+import io.mainactor.worktree.model.Task
 import io.mainactor.worktree.model.Branch
 import io.mainactor.worktree.ui.components.ToolButton
 import io.mainactor.worktree.CommandFailure
@@ -1360,22 +1360,22 @@ fun CommandFailureDialog(
 /**
  * Picks the idea to hand to a running agent.
  *
- * A list and nothing else. The moment this is open you already know which note you want — you
+ * A list and nothing else. The moment this is open you already know which task you want — you
  * wrote it — so the dialog's whole job is to be out of the way in one click, and the body is shown
  * beneath each title only far enough to tell two similar ideas apart.
  */
 @Composable
-fun SendNoteDialog(
-    notes: List<Note>,
+fun SendTaskDialog(
+    tasks: List<Task>,
     onDismiss: () -> Unit,
-    onSend: (Note) -> Unit,
+    onSend: (Task) -> Unit,
 ) {
     val colors = LocalWorktreeColors.current
-    var selected by remember { mutableStateOf(notes.firstOrNull()?.id) }
-    val chosen = notes.firstOrNull { it.id == selected }
+    var selected by remember { mutableStateOf(tasks.firstOrNull()?.id) }
+    val chosen = tasks.firstOrNull { it.id == selected }
 
     Modal(
-        title = "Send a note to this agent",
+        title = "Send a task to this agent",
         onDismiss = onDismiss,
         width = 560.dp,
         footer = {
@@ -1388,9 +1388,9 @@ fun SendNoteDialog(
             )
         },
     ) {
-        if (notes.isEmpty()) {
+        if (tasks.isEmpty()) {
             Text(
-                "Nothing written down yet. The Notes tab is where ideas go.",
+                "Nothing left on the list. The Tasks tab is where work goes.",
                 color = colors.textDim,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1399,33 +1399,33 @@ fun SendNoteDialog(
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 // Said before it happens, because it happens the moment the button is pressed.
-                "The note is pasted into the pane and submitted.",
+                "The task is pasted into the pane and submitted.",
                 color = colors.textDim,
                 style = MaterialTheme.typography.bodySmall,
             )
-            // Sized to the notes, not to the cap: a `LazyColumn` fills the height it is offered,
-            // so `heightIn(max = …)` alone leaves a dialog of empty space under two notes.
-            Box(Modifier.fillMaxWidth().height((NOTE_ROW_HEIGHT * notes.size).coerceAtMost(NOTE_LIST_MAX))) {
+            // Sized to the tasks, not to the cap: a `LazyColumn` fills the height it is offered,
+            // so `heightIn(max = …)` alone leaves a dialog of empty space under two tasks.
+            Box(Modifier.fillMaxWidth().height((TASK_ROW_HEIGHT * tasks.size).coerceAtMost(TASK_LIST_MAX))) {
                 val listState = rememberLazyListState()
                 LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                    items(notes, key = { it.id }) { note ->
+                    items(tasks, key = { it.id }) { task ->
                         ListRow(
-                            selected = note.id == selected,
-                            onClick = { selected = note.id },
-                            height = NOTE_ROW_HEIGHT,
+                            selected = task.id == selected,
+                            onClick = { selected = task.id },
+                            height = TASK_ROW_HEIGHT,
                             padding = PaddingValues(horizontal = 8.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    note.title,
-                                    color = if (note.isEmpty) colors.textDisabled else colors.text,
+                                    task.title,
+                                    color = if (task.isEmpty) colors.textDisabled else colors.text,
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (note.preview.isNotEmpty()) {
+                                if (task.preview.isNotEmpty()) {
                                     Text(
-                                        note.preview,
+                                        task.preview,
                                         color = colors.textDisabled,
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 1,
@@ -1445,8 +1445,8 @@ fun SendNoteDialog(
     }
 }
 
-/** Two lines of text: a note's first line and its second. */
-private val NOTE_ROW_HEIGHT = 44.dp
+/** Two lines of text: a task's first line and its second. */
+private val TASK_ROW_HEIGHT = 44.dp
 
 /** Past this the list scrolls rather than growing the dialog past the window. */
-private val NOTE_LIST_MAX = 320.dp
+private val TASK_LIST_MAX = 320.dp

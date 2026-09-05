@@ -137,7 +137,7 @@ class AppRenderTest {
     }
 
     @Test
-    fun `notes are written in one pane and picked from another`() {
+    fun `tasks are written in one pane and picked from another`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
@@ -146,35 +146,40 @@ class AppRenderTest {
         val image = try {
             scene.render()
             scene.render()
-            state.rightTab = RightTab.NOTES
-            state.addNote()
-            state.updateNote(state.selectedNote!!, "Ship the release notes\n\nRead the log since the last tag.")
-            state.addNote()
-            state.updateNote(
-                state.selectedNote!!,
+            state.rightTab = RightTab.TASKS
+            state.addTask()
+            state.updateTask(state.selectedTask!!, "Ship the release notes\n\nRead the log since the last tag.")
+            state.addTask()
+            state.updateTask(
+                state.selectedTask!!,
                 "Rewrite the pty layer on FFM\n\nNo native library should ship in a jar.",
             )
+            state.addTask()
+            state.updateTask(state.selectedTask!!, "Sign and notarize the DMG")
+            state.toggleTaskDone(state.selectedTask!!)
             scene.render()
         } finally {
             scene.close()
         }
 
-        File("build/reports/app-render-notes.png").apply { parentFile?.mkdirs() }
+        File("build/reports/app-render-tasks.png").apply { parentFile?.mkdirs() }
             .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
 
-        // The list is newest first, and a note is named by its own first line.
+        // Open first and newest within that, the finished one at the bottom; each named by its
+        // own first line.
         assertEquals(
-            listOf("Rewrite the pty layer on FFM", "Ship the release notes"),
-            state.notes.map { it.title },
+            listOf("Rewrite the pty layer on FFM", "Ship the release notes", "Sign and notarize the DMG"),
+            state.tasks.map { it.title },
         )
+        assertEquals(listOf(false, false, true), state.tasks.map { it.done })
     }
 
     /**
-     * The note button is on the pane's own header, so sending an idea to an agent is a click
+     * The task button is on the pane's own header, so sending an idea to an agent is a click
      * rather than a right-click through a menu of eight other things.
      */
     @Test
-    fun `a pane header sends a note without going through the context menu`() {
+    fun `a pane header sends a task without going through the context menu`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
@@ -183,8 +188,8 @@ class AppRenderTest {
         val image = try {
             scene.render()
             scene.render()
-            state.addNote()
-            state.updateNote(state.selectedNote!!, "Rewrite the pty layer on FFM")
+            state.addTask()
+            state.updateTask(state.selectedTask!!, "Rewrite the pty layer on FFM")
             state.switchTo(AppMode.AGENTS)
             state.openAgent(state.worktrees.first())
             scene.render()
@@ -192,7 +197,7 @@ class AppRenderTest {
 
             // Sixth button from the right edge of a full-width header: close, zoom, split down,
             // split right, go to worktree, and then this one.
-            val spot = Offset(NOTE_BUTTON_X, PANE_HEADER_Y)
+            val spot = Offset(TASK_BUTTON_X, PANE_HEADER_Y)
             scene.sendPointerEvent(PointerEventType.Move, spot)
             scene.sendPointerEvent(PointerEventType.Press, spot, button = PointerButton.Primary)
             scene.sendPointerEvent(PointerEventType.Release, spot, button = PointerButton.Primary)
@@ -202,14 +207,14 @@ class AppRenderTest {
             scene.close()
         }
 
-        File("build/reports/app-render-agent-note.png").apply { parentFile?.mkdirs() }
+        File("build/reports/app-render-agent-task.png").apply { parentFile?.mkdirs() }
             .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
 
-        assertEquals(state.agents.single().id, state.noteRequest, "the picker should have opened for this pane")
+        assertEquals(state.agents.single().id, state.taskRequest, "the picker should have opened for this pane")
     }
 
     @Test
-    fun `renders the picker that sends a note to an agent`() {
+    fun `renders the picker that sends a task to an agent`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
@@ -218,13 +223,13 @@ class AppRenderTest {
         val image = try {
             scene.render()
             scene.render()
-            state.addNote()
-            state.updateNote(state.selectedNote!!, "Rewrite the pty layer on FFM\n\nNo native library in a jar.")
-            state.addNote()
-            state.updateNote(state.selectedNote!!, "Ship the release notes")
+            state.addTask()
+            state.updateTask(state.selectedTask!!, "Rewrite the pty layer on FFM\n\nNo native library in a jar.")
+            state.addTask()
+            state.updateTask(state.selectedTask!!, "Ship the release notes")
             state.switchTo(AppMode.AGENTS)
             scene.render()
-            state.requestNote("pane-1")
+            state.requestTask("pane-1")
             // One pass runs the effect that turns the request into a dialog, the next paints it.
             scene.render()
             scene.render()
@@ -232,10 +237,10 @@ class AppRenderTest {
             scene.close()
         }
 
-        File("build/reports/app-render-send-note.png").apply { parentFile?.mkdirs() }
+        File("build/reports/app-render-send-task.png").apply { parentFile?.mkdirs() }
             .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
 
-        assertEquals("pane-1", state.noteRequest, "the picker should still be open")
+        assertEquals("pane-1", state.taskRequest, "the picker should still be open")
     }
 
     @Test
@@ -1113,12 +1118,12 @@ class AppRenderTest {
         const val PANE_HEADER_Y = 87f
 
         /**
-         * Centre of the note button on a full-width pane header.
+         * Centre of the task button on a full-width pane header.
          *
          * The buttons are 20dp wide, 6dp apart, and the row ends 2dp from the window's edge, so
-         * they count back from there: close, zoom, split down, split right, go to worktree, note.
+         * they count back from there: close, zoom, split down, split right, go to worktree, task.
          */
-        const val NOTE_BUTTON_X = WIDTH - 2f - 10f - 5 * 26f
+        const val TASK_BUTTON_X = WIDTH - 2f - 10f - 5 * 26f
 
         /** `WorktreeColors.separator` — Gray3, the one divider colour visible on the editor. */
         const val SEPARATOR = 0x393B40
@@ -1194,7 +1199,7 @@ private class FakeRunner(private val worktrees: Int, private val conflicted: Boo
             "# branch.ab +2 -1",
             "1 M. N... 100644 100644 100644 aaa bbb src/Main.kt",
             "1 .M N... 100644 100644 100644 ccc ddd README.md",
-            "? notes.txt",
+            "? tasks.txt",
         ).joinToString(NUL.toString()) + NUL
 
         val BRANCHES = buildString {
@@ -1303,7 +1308,7 @@ private class FakeFileSystem(private val conflicted: Boolean = false) : FileSyst
     // Fixed clock and file times, so the rendered ages never drift between runs.
     override fun now() = NOW
 
-    override fun lastModifiedAt(path: String) = if (path.endsWith("notes.txt")) NOW - 240 else 0L
+    override fun lastModifiedAt(path: String) = if (path.endsWith("tasks.txt")) NOW - 240 else 0L
 
     private companion object {
         const val NOW = 1_700_000_000L

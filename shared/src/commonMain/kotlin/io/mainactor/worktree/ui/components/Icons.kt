@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, NOTE,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, TASK,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -54,12 +54,13 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
-        // Written lines, not a page outline: at 11dp a rectangle with text inside it is a smudge,
-        // while three rules with a short last one reads as writing at any size.
-        IconKind.NOTE -> {
-            line(0.2f, 0.28f, 0.8f, 0.28f)
-            line(0.2f, 0.5f, 0.8f, 0.5f)
-            line(0.2f, 0.72f, 0.55f, 0.72f)
+        // A ticked line over an unticked one: a checklist, not a page. At 11dp a box with a rule
+        // beside it is a smudge, so the tick stands on its own and the rules say what it is for.
+        IconKind.TASK -> {
+            line(0.12f, 0.32f, 0.26f, 0.46f)
+            line(0.26f, 0.46f, 0.46f, 0.16f)
+            line(0.56f, 0.34f, 0.88f, 0.34f)
+            line(0.12f, 0.72f, 0.88f, 0.72f)
         }
         // Two arrowheads pushing apart: more of the file above and more of it below.
         IconKind.EXPAND -> {

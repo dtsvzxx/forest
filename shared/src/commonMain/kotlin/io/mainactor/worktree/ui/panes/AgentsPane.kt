@@ -214,13 +214,13 @@ private fun AgentPane(
                 ContextMenuItem("New agent here") {
                     state.openAgent(state.worktrees.firstOrNull { it.path == session.workDir })
                 },
-                // The whole reason the notes pane is worth writing in: an idea is one right-click
+                // The whole reason the tasks pane is worth writing in: an idea is one right-click
                 // from the agent that will act on it.
                 ContextMenuItem(
-                    if (state.notes.isEmpty()) "Send note… (none yet)" else "Send note…",
+                    if (state.openTasks.isEmpty()) "Send task… (none open)" else "Send task…",
                 ) {
                     state.focusAgent(session.id)
-                    state.requestNote(session.id)
+                    state.requestTask(session.id)
                 },
                 ContextMenuItem("Copy path") { state.system.copyToClipboard(session.workDir) },
                 ContextMenuItem(state.system.revealLabel) { state.system.reveal(session.workDir) },
@@ -313,16 +313,16 @@ private fun AgentPaneHeader(
                 )
             }
         }
-        // Only once there is something to send. A button whose every press could say no more than
-        // "nothing written down yet" is furniture for everyone who does not keep notes, and the
-        // context menu still carries the entry that says where notes come from.
-        if (state.notes.isNotEmpty()) {
+        // Only while something is left to do. A button whose every press could say no more than
+        // "nothing on the list" is furniture on the header of everyone who does not keep one, and
+        // the context menu still carries the entry that says where tasks come from.
+        if (state.openTasks.isNotEmpty()) {
             ToolButton(
-                icon = IconKind.NOTE,
-                tooltip = "Send a note to this agent — it is pasted into the pane and submitted",
+                icon = IconKind.TASK,
+                tooltip = "Send a task to this agent — it is pasted into the pane and submitted",
                 onClick = {
                     state.focusAgent(session.id)
-                    state.requestNote(session.id)
+                    state.requestTask(session.id)
                 },
                 modifier = Modifier.size(20.dp),
                 tint = colors.textDim,
