@@ -509,6 +509,44 @@ class AppRenderTest {
         )
     }
 
+    /**
+     * The lists that had no menu now have one, and this is the guard that they still do.
+     *
+     * A right-click acts on the row under the pointer, which is the whole point of having one: the
+     * toolbar acts on the *selected* file, so reaching for it means selecting first. The changed
+     * files list is the one that costs the most to be without.
+     */
+    @Test
+    fun `right-clicking a changed file opens its context menu`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            // The first file row. Not the section header above it, which is what a guess at the
+            // coordinates lands on and which has no menu of its own.
+            val spot = Offset(700f, 147f)
+            scene.sendPointerEvent(PointerEventType.Move, spot)
+            scene.sendPointerEvent(PointerEventType.Press, spot, button = PointerButton.Secondary)
+            scene.sendPointerEvent(PointerEventType.Release, spot, button = PointerButton.Secondary)
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes!!
+        File("build/reports/app-render-file-menu.png").apply { parentFile?.mkdirs() }.writeBytes(png)
+
+        assertTrue(
+            hasNonPanelPixels(image, x = 700, y = 160, width = 200, height = 80),
+            "no context menu appeared under the pointer",
+        )
+    }
+
     @Test
     fun `renders the new-worktree dialog`() {
         // Dialogs are modal state inside App and cannot be opened from outside it, so the

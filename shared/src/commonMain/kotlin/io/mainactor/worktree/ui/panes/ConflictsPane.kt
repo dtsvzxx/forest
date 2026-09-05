@@ -1,6 +1,8 @@
 package io.mainactor.worktree.ui.panes
 
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -82,6 +84,21 @@ fun ConflictsPane(state: AppState, modifier: Modifier = Modifier) {
                 val listState = rememberLazyListState()
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(conflicts, key = { it.path }) { file ->
+                        ContextMenuArea(
+                            items = {
+                                listOf(
+                                    ContextMenuItem(state.system.revealLabel) {
+                                        state.system.reveal(state.pathOf(file.path))
+                                    },
+                                    ContextMenuItem("Copy path") {
+                                        state.system.copyToClipboard(state.pathOf(file.path))
+                                    },
+                                    ContextMenuItem("Copy relative path") {
+                                        state.system.copyToClipboard(file.path)
+                                    },
+                                )
+                            },
+                        ) {
                         ListRow(
                             selected = state.conflictFile?.path == file.path,
                             onClick = { state.openConflict(file.path) },
@@ -106,6 +123,7 @@ fun ConflictsPane(state: AppState, modifier: Modifier = Modifier) {
                                     overflow = TextOverflow.MiddleEllipsis,
                                 )
                             }
+                        }
                         }
                     }
                 }

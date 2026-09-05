@@ -680,6 +680,15 @@ class AppState(
      */
     private val diffContext: Int get() = if (wholeFileDiff) WHOLE_FILE_CONTEXT else 3
 
+    /**
+     * A path from a diff, made absolute.
+     *
+     * git reports paths relative to the worktree, and everything that leaves the window — revealing
+     * a file, putting one on the clipboard — wants the whole thing.
+     */
+    fun pathOf(relative: String): String =
+        selectedWorktree?.path?.let { fs.resolve(it, relative) } ?: relative
+
     fun selectRangeFile(fileDiff: FileDiff) {
         selectedFile = null
         conflictFile = null

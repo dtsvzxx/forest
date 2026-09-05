@@ -1,6 +1,8 @@
 package io.mainactor.worktree.ui.panes
 
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -105,6 +107,7 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
                     diff = state.fileDiff,
                     loading = state.fileDiffLoading,
                     highlighter = state.highlighter,
+                    onCopy = state.system::copyToClipboard,
                     emptyText = when {
                         state.searchFile == null -> "Find a file above to see where it changed."
                         state.fileCommits.isEmpty() -> "No commit has touched this file."
@@ -164,7 +167,23 @@ private fun Results(state: AppState) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     item { SectionHeader("Files", results.size, colors.modified) }
                     items(results, key = { it }) { path ->
-                        ResultRow(path, state.searchFile == path) { state.selectSearchFile(path) }
+                        ContextMenuArea(
+                            items = {
+                                listOf(
+                                    ContextMenuItem(state.system.revealLabel) {
+                                        state.system.reveal(state.pathOf(path))
+                                    },
+                                    ContextMenuItem("Copy path") {
+                                        state.system.copyToClipboard(state.pathOf(path))
+                                    },
+                                    ContextMenuItem("Copy relative path") {
+                                        state.system.copyToClipboard(path)
+                                    },
+                                )
+                            },
+                        ) {
+                            ResultRow(path, state.searchFile == path) { state.selectSearchFile(path) }
+                        }
                     }
                 }
                 VerticalScrollbar(
@@ -215,12 +234,14 @@ private fun History(state: AppState) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     item { SectionHeader("Commits", commits.size, colors.branchRemote) }
                     items(commits, key = { it.hash }) { commit ->
-                        HistoryRow(
-                            commit = commit,
-                            hashWidth = hashWidth,
-                            selected = state.fileCommit?.hash == commit.hash,
-                            onClick = { state.selectFileCommit(commit) },
-                        )
+                        ContextMenuArea(items = { commitActions(state, commit) }) {
+                            HistoryRow(
+                                commit = commit,
+                                hashWidth = hashWidth,
+                                selected = state.fileCommit?.hash == commit.hash,
+                                onClick = { state.selectFileCommit(commit) },
+                            )
+                        }
                     }
                 }
                 VerticalScrollbar(

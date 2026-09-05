@@ -1,6 +1,8 @@
 package io.mainactor.worktree.ui.panes
 
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -104,6 +106,7 @@ fun ChangesPane(
                     diff = state.diff,
                     loading = state.diffLoading,
                     highlighter = state.highlighter,
+                    onCopy = state.system::copyToClipboard,
                     emptyText = when (state.diffMode) {
                         DiffMode.WORKING_TREE -> "Select a changed file above."
                         DiffMode.AGAINST_BASE -> "Select a file above."
@@ -268,19 +271,19 @@ private fun WorkingTreeFileList(state: AppState) {
             if (conflicts.isNotEmpty()) {
                 item { SectionHeader("Conflicts", conflicts.size, colors.conflicted) }
                 items(conflicts, key = { "c:${it.path}" }) { file ->
-                    FileRow(file, state.selectedFile?.path == file.path) { state.selectFile(file) }
+                    FileRow(state, file, state.selectedFile?.path == file.path) { state.selectFile(file) }
                 }
             }
             if (staged.isNotEmpty()) {
                 item { SectionHeader("Staged", staged.size, colors.added) }
                 items(staged, key = { "s:${it.path}" }) { file ->
-                    FileRow(file, state.selectedFile?.path == file.path) { state.selectFile(file) }
+                    FileRow(state, file, state.selectedFile?.path == file.path) { state.selectFile(file) }
                 }
             }
             if (unstaged.isNotEmpty()) {
                 item { SectionHeader("Changes", unstaged.size, colors.modified) }
                 items(unstaged, key = { "u:${it.path}" }) { file ->
-                    FileRow(file, state.selectedFile?.path == file.path) { state.selectFile(file) }
+                    FileRow(state, file, state.selectedFile?.path == file.path) { state.selectFile(file) }
                 }
             }
         }
@@ -305,7 +308,12 @@ private fun RangeFileList(state: AppState) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             item { SectionHeader("Changed vs ${state.baseRef}", diffs.size, LocalWorktreeColors.current.modified) }
             items(diffs, key = { it.path }) { fileDiff ->
-                FileDiffRow(fileDiff, state.diff?.path == fileDiff.path) { state.selectRangeFile(fileDiff) }
+                FileDiffRow(
+                    diff = fileDiff,
+                    selected = state.diff?.path == fileDiff.path,
+                    onClick = { state.selectRangeFile(fileDiff) },
+                    menu = { fileActions(state, fileDiff.path) },
+                )
             }
         }
         VerticalScrollbar(
@@ -333,8 +341,21 @@ internal fun SectionHeader(title: String, count: Int, color: Color) {
     }
 }
 
+/**
+ * What a file in a list can have done to it, wherever that list is.
+ *
+ * The same entries the toolbar carries, on the row they apply to — a right-click acts on what is
+ * under the pointer, which is the point of having one at all: the toolbar acts on the *selected*
+ * file, and reaching for it means selecting first.
+ */
+private fun fileActions(state: AppState, path: String): List<ContextMenuItem> = buildList {
+    add(ContextMenuItem(state.system.revealLabel) { state.system.reveal(state.pathOf(path)) })
+    add(ContextMenuItem("Copy path") { state.system.copyToClipboard(state.pathOf(path)) })
+    add(ContextMenuItem("Copy relative path") { state.system.copyToClipboard(path) })
+}
+
 @Composable
-private fun FileRow(file: ChangedFile, selected: Boolean, onClick: () -> Unit) {
+private fun FileRow(state: AppState, file: ChangedFile, selected: Boolean, onClick: () -> Unit) {
     val colors = LocalWorktreeColors.current
     val statusColor = when {
         file.conflicted -> colors.conflicted
@@ -344,6 +365,22 @@ private fun FileRow(file: ChangedFile, selected: Boolean, onClick: () -> Unit) {
         file.badge == 'R' -> colors.renamed
         else -> colors.modified
     }
+    ContextMenuArea(
+        items = {
+            buildList {
+                if (file.unstaged || file.untracked) {
+                    add(ContextMenuItem("Stage") { state.stage(listOf(file)) })
+                }
+                if (file.staged) add(ContextMenuItem("Unstage") { state.unstage(listOf(file)) })
+                addAll(fileActions(state, file.path))
+                // Last, and named for what it does. The toolbar offers the same thing with the
+                // same lack of a confirmation; being last is what keeps it away from `Copy path`.
+                if (!file.untracked) {
+                    add(ContextMenuItem("Discard changes — cannot be undone") { state.discard(listOf(file)) })
+                }
+            }
+        },
+    ) {
     ListRow(selected = selected, onClick = onClick, padding = PaddingValues(start = 8.dp, end = 8.dp)) {
         Text(
             text = file.badge.toString(),
@@ -369,11 +406,18 @@ private fun FileRow(file: ChangedFile, selected: Boolean, onClick: () -> Unit) {
         )
         if (file.staged && file.unstaged) Badge("partial", colors.warning)
     }
+    }
 }
 
 /** One row of a list of [FileDiff]s — the range comparison and the Log tab's commit both use it. */
 @Composable
-internal fun FileDiffRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit) {
+internal fun FileDiffRow(
+    diff: FileDiff,
+    selected: Boolean,
+    onClick: () -> Unit,
+    /** What a right-click offers, which differs between a range comparison and a commit. */
+    menu: (() -> List<ContextMenuItem>)? = null,
+) {
     val colors = LocalWorktreeColors.current
     val badge = when {
         diff.isNew -> "A"
@@ -381,6 +425,9 @@ internal fun FileDiffRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit)
         diff.isRename -> "R"
         else -> "M"
     }
+    // Written once and wrapped conditionally: `ContextMenuArea` has no "no menu" form, and the row
+    // is the same row with or without one.
+    val row = @Composable {
     ListRow(selected = selected, onClick = onClick, padding = PaddingValues(start = 8.dp, end = 8.dp)) {
         Text(
             text = badge,
@@ -411,6 +458,8 @@ internal fun FileDiffRow(diff: FileDiff, selected: Boolean, onClick: () -> Unit)
         )
         DiffStat(diff)
     }
+    }
+    if (menu != null) ContextMenuArea(items = menu) { row() } else row()
 }
 
 @Composable

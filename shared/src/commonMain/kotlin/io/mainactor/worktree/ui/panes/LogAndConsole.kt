@@ -1,6 +1,8 @@
 package io.mainactor.worktree.ui.panes
 
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -106,6 +108,7 @@ fun LogPane(state: AppState, modifier: Modifier = Modifier) {
                     diff = state.commitFile,
                     loading = state.commitDiffLoading,
                     highlighter = state.highlighter,
+                    onCopy = state.system::copyToClipboard,
                     emptyText = if (state.selectedCommit == null) {
                         "Select a commit above to see what it changed."
                     } else {
@@ -128,12 +131,14 @@ private fun CommitList(state: AppState) {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             items(state.commits, key = { it.hash }) { commit ->
-                CommitRow(
-                    commit = commit,
-                    hashWidth = hashWidth,
-                    selected = state.selectedCommit?.hash == commit.hash,
-                    onClick = { state.selectCommit(commit) },
-                )
+                ContextMenuArea(items = { commitActions(state, commit) }) {
+                    CommitRow(
+                        commit = commit,
+                        hashWidth = hashWidth,
+                        selected = state.selectedCommit?.hash == commit.hash,
+                        onClick = { state.selectCommit(commit) },
+                    )
+                }
             }
         }
         VerticalScrollbar(
@@ -216,9 +221,22 @@ private fun CommitFiles(state: AppState) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     item { SectionHeader("Files", files.size, colors.modified) }
                     items(files, key = { it.path }) { file ->
-                        FileDiffRow(file, state.commitFile?.path == file.path) {
-                            state.selectCommitFile(file)
-                        }
+                        FileDiffRow(
+                            diff = file,
+                            selected = state.commitFile?.path == file.path,
+                            onClick = { state.selectCommitFile(file) },
+                            // A file inside a commit is not a file on disk — it may not exist any
+                            // more, and it certainly is not this version — so the menu offers what
+                            // is true of it: its name, and the commit it came from.
+                            menu = {
+                                listOf(
+                                    ContextMenuItem("Copy path") { state.system.copyToClipboard(file.path) },
+                                    ContextMenuItem("Copy file name") {
+                                        state.system.copyToClipboard(file.path.substringAfterLast('/'))
+                                    },
+                                )
+                            },
+                        )
                     }
                 }
                 VerticalScrollbar(
@@ -259,7 +277,7 @@ fun ConsolePane(state: AppState, modifier: Modifier = Modifier) {
 
     Box(modifier.fillMaxSize().background(colors.editor)) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-            items(state.gitLog.toList(), key = { it.seq }) { entry -> ConsoleEntry(entry) }
+            items(state.gitLog.toList(), key = { it.seq }) { entry -> ConsoleEntry(state, entry) }
         }
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(listState),
@@ -268,10 +286,43 @@ fun ConsolePane(state: AppState, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * What a commit row offers.
+ *
+ * All of it is copying, because that is what a hash is for: it goes into a `git` command, a review,
+ * a message to somebody. The short form is offered beside the full one because it is the one people
+ * paste into prose, and the full one is what a command wants.
+ */
+internal fun commitActions(state: AppState, commit: CommitInfo): List<ContextMenuItem> = listOf(
+    ContextMenuItem("Copy hash") { state.system.copyToClipboard(commit.hash) },
+    ContextMenuItem("Copy short hash") { state.system.copyToClipboard(commit.shortHash) },
+    ContextMenuItem("Copy subject") { state.system.copyToClipboard(commit.subject) },
+    ContextMenuItem("Copy hash and subject") {
+        state.system.copyToClipboard("${commit.shortHash} ${commit.subject}")
+    },
+)
+
 @Composable
-private fun ConsoleEntry(entry: GitLogEntry) {
+private fun ConsoleEntry(state: AppState, entry: GitLogEntry) {
     val colors = LocalWorktreeColors.current
     val hScroll = rememberScrollState()
+    ContextMenuArea(
+        items = {
+            buildList {
+                // The Console tab exists so nothing is hidden; being able to take a command out of
+                // it and run it yourself is the other half of that promise.
+                add(ContextMenuItem("Copy command") { state.system.copyToClipboard(entry.command) })
+                if (entry.output.isNotBlank()) {
+                    add(ContextMenuItem("Copy output") { state.system.copyToClipboard(entry.output) })
+                    add(
+                        ContextMenuItem("Copy command and output") {
+                            state.system.copyToClipboard("$ ${entry.command}\n${entry.output}")
+                        },
+                    )
+                }
+            }
+        },
+    ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -305,6 +356,7 @@ private fun ConsoleEntry(entry: GitLogEntry) {
                 )
             }
         }
+    }
     }
 }
 

@@ -2,6 +2,8 @@ package io.mainactor.worktree.ui.panes
 
 import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +63,8 @@ fun DiffView(
     modifier: Modifier = Modifier,
     emptyText: String = "Select a file to see its diff.",
     highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
+    /** Puts text on the clipboard, when there is somewhere to put it. */
+    onCopy: ((String) -> Unit)? = null,
 ) {
     val colors = LocalWorktreeColors.current
 
@@ -132,6 +136,8 @@ fun DiffView(
                             tokens = tokens.getOrNull(lineIndex[index]) ?: LineTokens.NONE,
                             contentWidth = contentWidth,
                             hScroll = hScroll,
+                            onCopy = onCopy,
+                            hunkText = { hunkTextAt(diff, index, rows) },
                         )
                     }
                 }
@@ -176,6 +182,8 @@ private fun DiffLineRow(
     tokens: LineTokens,
     contentWidth: androidx.compose.ui.unit.Dp,
     hScroll: androidx.compose.foundation.ScrollState,
+    onCopy: ((String) -> Unit)? = null,
+    hunkText: () -> String = { "" },
 ) {
     val colors = LocalWorktreeColors.current
     val background = when (line.type) {
@@ -194,6 +202,7 @@ private fun DiffLineRow(
         else -> colors.text
     }
 
+    val row = @Composable {
     Row(Modifier.fillMaxWidth().background(background)) {
         // Gutter: old and new line numbers, pinned while the code scrolls.
         Row(
@@ -216,6 +225,35 @@ private fun DiffLineRow(
             )
         }
     }
+    }
+    if (onCopy == null) {
+        row()
+        return
+    }
+    ContextMenuArea(
+        items = {
+            listOf(
+                // Without the marker: a `+` in front of a line is the patch's, not the file's, and
+                // pasting it into an editor is never what was wanted.
+                ContextMenuItem("Copy line") { onCopy(line.text) },
+                ContextMenuItem("Copy hunk") { onCopy(hunkText()) },
+            )
+        },
+    ) { row() }
+}
+
+/** The whole hunk a row belongs to, as the text it would be if pasted. */
+private fun hunkTextAt(diff: FileDiff, rowIndex: Int, rows: List<DiffRow>): String {
+    var header = ""
+    for (index in rowIndex downTo 0) {
+        val row = rows[index]
+        if (row is DiffRow.Header) {
+            header = row.text
+            break
+        }
+    }
+    val hunk = diff.hunks.firstOrNull { it.header == header } ?: return ""
+    return hunk.lines.joinToString("\n") { it.text }
 }
 
 /**
