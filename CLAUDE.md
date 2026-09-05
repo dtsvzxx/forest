@@ -697,6 +697,16 @@ to leave out:
 - **`signDmg`.** The disk image itself needs a signature. Without one the app inside is notarized and
   passes, while the container the user double-clicks reports "no usable signature".
 
+**A release notarizes twice, and the order is the point.** `notarizeApp` submits the bundle,
+staples the ticket to it, and only then is the image packaged around the stapled copy — which is
+what Apple's own instructions describe. The image gets a ticket of its own at the end, and that
+covers the app while it is inside the image; it stops covering it the moment someone drags the app
+to /Applications, because a bundle carries only what is stapled to *it*. Staple the bundle after
+the image is built and the copy inside the image is the unstapled one, which is why `packageDmg`
+depends on `notarizeApp` rather than the other way round. Verified on 1.2.0 before the step
+existed: `stapler validate` on the app inside a stapled image answered "does not have a ticket
+stapled to it".
+
 Signing is verified working: full Developer ID chain, secure timestamp, `flags=0x10000(runtime)`,
 `codesign --verify --deep --strict` clean, and the signed hardened-runtime build starts under a
 Finder-like environment. The entitlements the Compose plugin applies by default are the ones this

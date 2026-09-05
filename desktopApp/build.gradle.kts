@@ -151,7 +151,6 @@ val hardenNatives = tasks.register<Exec>("hardenEmbeddedNatives") {
     )
 }
 
-tasks.matching { it.name == "packageDmg" }.configureEach { dependsOn(hardenNatives) }
 
 /**
  * Notarization against credentials kept in the keychain.
@@ -176,6 +175,36 @@ val notaryProfile: Provider<String> =
         .orElse("forest-notary")
 
 val dmgFile = layout.buildDirectory.file("compose/binaries/main/dmg/Forest-$appVersion.dmg")
+
+/**
+ * Notarizes the app bundle and staples the ticket to it, before the image is built around it.
+ *
+ * The image gets a ticket of its own at the end (`stapleDmg`), and that covers the app for as long
+ * as it is inside the image. It stops covering it the moment someone drags the app to
+ * /Applications: a bundle carries only what is stapled to *it*. Without this step, the first launch
+ * on a machine with no network — the one case stapling exists for — cannot verify the build.
+ *
+ * So the release notarizes twice, which is what Apple's own instructions describe. The order is
+ * what makes it work: staple the app, then package the image around the stapled copy. Done the
+ * other way round, the bundle inside the image is the unstapled one.
+ */
+val notarizeApp = tasks.register<Exec>("notarizeApp") {
+    group = "compose desktop"
+    description = "Notarizes Forest.app and staples its ticket, so it verifies after being installed."
+    dependsOn(hardenNatives)
+    val identity = macSigningIdentity.get()
+    // The bundle is edited in place, and a ticket that is already attached is re-attached cheaply.
+    outputs.upToDateWhen { false }
+    // Apple will not notarize an unsigned build, so an unsigned one simply skips this.
+    onlyIf { identity.isNotBlank() }
+    commandLine(
+        project.file("packaging/notarize-app.sh").absolutePath,
+        layout.buildDirectory.dir("compose/binaries/main/app/Forest.app").get().asFile.absolutePath,
+        notaryProfile.get(),
+    )
+}
+
+tasks.matching { it.name == "packageDmg" }.configureEach { dependsOn(hardenNatives, notarizeApp) }
 
 /**
  * Signs the disk image itself, not just the app inside it.
