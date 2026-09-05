@@ -61,7 +61,11 @@ fun MainToolbar(
             .fillMaxWidth()
             .height(Dimens.toolbarHeight)
             .background(colors.toolbar)
-            .padding(horizontal = 8.dp),
+            // The toolbar is the top of the window, so where the title bar is hidden it is also
+            // what the window is dragged by — and what has to keep clear of the buttons the
+            // platform still draws over it.
+            .windowHandle()
+            .padding(start = maxOf(8.dp, WindowChrome.controlsWidth), end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

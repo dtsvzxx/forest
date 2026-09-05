@@ -16,6 +16,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.mainactor.worktree.git.Git
@@ -32,6 +33,8 @@ import io.mainactor.worktree.ui.components.drawForestIcon
 import io.mainactor.worktree.ui.dialogs.NewAgentDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.SwitchBranchDialog
+import io.mainactor.worktree.ui.WindowChrome
+import io.mainactor.worktree.ui.theme.Dimens
 import io.mainactor.worktree.ui.theme.LocalWorktreeColors
 import io.mainactor.worktree.ui.theme.WorktreeTheme
 import kotlinx.coroutines.CoroutineScope
@@ -801,6 +804,56 @@ class AppRenderTest {
         File("build/reports/app-render-switch-branch.png").apply { parentFile?.mkdirs() }.writeBytes(png)
     }
 
+    /**
+     * The macOS title bar is hidden and its buttons are not: they stay in the top-left corner, on
+     * top of whatever the toolbar draws there. This is the guard that the toolbar starts to the
+     * right of them — a mode switch under the close button is unreachable, and looks like a bug in
+     * the window rather than in the layout.
+     */
+    @Test
+    fun `the toolbar keeps clear of the window's own buttons`() {
+        val strip = 78
+        assertTrue(
+            toolbarPaintsInside(strip, controlsWidth = 0.dp),
+            "nothing was drawn in the corner to begin with, so the test proves nothing",
+        )
+        assertTrue(
+            !toolbarPaintsInside(strip, controlsWidth = strip.dp),
+            "the toolbar still draws under the window's buttons",
+        )
+    }
+
+    /** True when the toolbar paints anything of its own in the first [width] points. */
+    private fun toolbarPaintsInside(width: Int, controlsWidth: Dp): Boolean {
+        val state = fakeState(worktrees = 2)
+        WindowChrome.controlsWidth = controlsWidth
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, modifier -> Box(modifier.fillMaxSize()) })
+        }
+        val image = try {
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+            // A global the platform layer sets: leaving it set would move every later render.
+            WindowChrome.controlsWidth = 0.dp
+        }
+
+        val pixels = image.peekPixels()!!
+        val bytes = pixels.buffer.bytes
+        var painted = 0
+        for (row in 2 until Dimens.toolbarHeight.value.toInt() - 2) {
+            for (col in 0 until width) {
+                val i = row * pixels.rowBytes + col * 4
+                val colour = ((bytes[i].toInt() and 0xFF) shl 16) or
+                    ((bytes[i + 1].toInt() and 0xFF) shl 8) or
+                    (bytes[i + 2].toInt() and 0xFF)
+                if (colour != TOOLBAR_RGB) painted++
+            }
+        }
+        return painted > 20
+    }
+
     private fun render(worktrees: Int, into: File, conflicted: Boolean = false) {
         val state = fakeState(worktrees, conflicted)
 
@@ -881,6 +934,9 @@ class AppRenderTest {
 
         /** Sampling every Nth pixel is plenty to tell "painted" from "flat fill". */
         const val SAMPLE_STRIDE = 37
+
+        /** `WorktreeColors.toolbar` — Gray2, the flat background the toolbar draws on. */
+        const val TOOLBAR_RGB = 0x2B2D30
 
         /** Comfortably past the tooltip's own hover delay, which runs on real time. */
         const val TOOLTIP_WAIT_MS = 900L

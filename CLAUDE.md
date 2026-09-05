@@ -145,6 +145,32 @@ only a fraction of what an IDE-style UI needs, so most colours come from there. 
 `Canvas` (`ui/components/Icons.kt`) rather than pulled from an icon library. Dialogs are in-window
 modals (`ui/dialogs/Dialogs.kt`), not separate windows.
 
+**The macOS title bar is hidden and its buttons are not.** `window/TitleBar.kt` sets three client
+properties — `apple.awt.fullWindowContent` (the content pane reaches into the bar's strip),
+`transparentTitleBar` (AppKit stops painting the bar and its hairline over it) and
+`windowTitleVisible` (the centred title text goes). Not `undecorated = true`, which would take the
+close/minimise/zoom buttons with the bar, along with the native resize edges, shadow and rounded
+corners. `TitleBarTest` asserts the window's top inset drops from 28pt to 0 — what AppKit did,
+rather than what it was asked to do — and it uses `pack()`, so no window ever appears on screen.
+
+The toolbar then inherits everything that strip used to do, through `ui/WindowChrome.kt`, a global
+the platform layer fills in the way it does `AgentShortcuts`; it is inert by default, so the render
+tests and the other platforms are untouched.
+
+- It starts at `controlsWidth` (78dp: the buttons are 12pt wide, 20pt apart, from 20pt) instead of
+  the usual 8dp — the buttons are drawn by the window server on top of whatever is there, and a
+  mode switch under the close button cannot be clicked. Full screen takes them away, and the inset
+  goes with them. `the toolbar keeps clear of the window's own buttons` renders both and reads the
+  corner.
+- It drags the window, because the bar that did is gone. `WindowDrag` computes the position from
+  the pointer's *screen* coordinates against where the press landed, never from per-event deltas: a
+  delta is measured against a window that has already moved under the pointer, and should AppKit
+  turn out to drag the window as well, an absolute target lands in the same place instead of twice
+  as far. The AWT listener is global because Compose's canvas is what AWT delivers mouse events to,
+  and half of a drag that moves a window happens outside it.
+- A press consumed by a button inside the toolbar never reaches `Modifier.windowHandle`, which is
+  what keeps the controls clickable and leaves only the bar's own background dragging the window.
+
 Every `ToolButton` carries a `tooltip`, and the git-driven ones a `detail` holding the exact command
 they run — at 14dp an icon does not say what `git worktree prune` will do, and the Console tab's
 "nothing is hidden" promise is worth applying to the buttons too. `Tooltip` wraps Compose Desktop's

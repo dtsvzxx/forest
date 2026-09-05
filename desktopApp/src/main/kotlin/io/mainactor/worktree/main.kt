@@ -1,6 +1,7 @@
 package io.mainactor.worktree
 
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import java.awt.Taskbar
 import androidx.compose.ui.unit.LayoutDirection
@@ -11,6 +12,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.mainactor.worktree.git.Git
@@ -28,6 +30,9 @@ import io.mainactor.worktree.terminal.EmbeddedTerminal
 import io.mainactor.worktree.terminal.defaultAgentBindings
 import io.mainactor.worktree.ui.components.ForestIconPainter
 import io.mainactor.worktree.ui.AgentShortcuts
+import io.mainactor.worktree.ui.WindowChrome
+import io.mainactor.worktree.window.WindowDrag
+import io.mainactor.worktree.window.hideTitleBar
 import io.mainactor.worktree.terminal.TerminalSessionManager
 
 fun main() {
@@ -95,6 +100,43 @@ fun main() {
             icon = remember { ForestIconPainter() },
             title = state.project?.let { "${it.name} — Forest" } ?: "Forest",
         ) {
+            // The window keeps its buttons but loses its title bar, so the toolbar reaches into
+            // that strip — and takes over what the bar did with it.
+            DisposableEffect(window) {
+                hideTitleBar(window.rootPane)
+                if (Os.isMac) {
+                    val drag = WindowDrag(window)
+                    // A maximised or full-screen window does not follow the pointer, and neither
+                    // does a title bar's drag.
+                    WindowChrome.onDragStart = {
+                        if (windowState.placement == WindowPlacement.Floating) drag.start()
+                    }
+                    WindowChrome.onToggleZoom = {
+                        windowState.placement = if (windowState.placement == WindowPlacement.Floating) {
+                            WindowPlacement.Maximized
+                        } else {
+                            WindowPlacement.Floating
+                        }
+                    }
+                }
+                onDispose {
+                    WindowChrome.onDragStart = null
+                    WindowChrome.onToggleZoom = null
+                }
+            }
+
+            // Full screen takes the buttons away with the rest of the frame, and the toolbar gets
+            // the corner back.
+            LaunchedEffect(windowState.placement) {
+                WindowChrome.controlsWidth = if (Os.isMac &&
+                    windowState.placement != WindowPlacement.Fullscreen
+                ) {
+                    MAC_WINDOW_CONTROLS_WIDTH
+                } else {
+                    0.dp
+                }
+            }
+
             App(
                 state = state,
                 terminal = { session, focused, modifier ->
@@ -144,3 +186,11 @@ private fun rememberAppState(terminals: TerminalSessionManager): AppState {
 
 /** Large enough for a retina Dock; the mark is vector, so the number only sets the raster size. */
 private const val DOCK_ICON_SIDE = 512f
+
+/**
+ * How far the macOS close/minimise/zoom buttons reach from the window's left edge.
+ *
+ * They are laid out by the window server, not by us — 12pt wide, 20pt apart, from 20pt — and this
+ * leaves the same margin after the last of them that they start with.
+ */
+private val MAC_WINDOW_CONTROLS_WIDTH = 78.dp
