@@ -313,6 +313,21 @@ private fun AgentPaneHeader(
                 )
             }
         }
+        // Only once there is something to send. A button whose every press could say no more than
+        // "nothing written down yet" is furniture for everyone who does not keep notes, and the
+        // context menu still carries the entry that says where notes come from.
+        if (state.notes.isNotEmpty()) {
+            ToolButton(
+                icon = IconKind.NOTE,
+                tooltip = "Send a note to this agent — it is pasted into the pane and submitted",
+                onClick = {
+                    state.focusAgent(session.id)
+                    state.requestNote(session.id)
+                },
+                modifier = Modifier.size(20.dp),
+                tint = colors.textDim,
+            )
+        }
         ToolButton(
             icon = IconKind.GOTO,
             tooltip = "Show this agent's worktree in the project view",

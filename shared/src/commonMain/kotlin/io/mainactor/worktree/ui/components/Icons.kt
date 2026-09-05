@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, NOTE,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -54,6 +54,13 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
+        // Written lines, not a page outline: at 11dp a rectangle with text inside it is a smudge,
+        // while three rules with a short last one reads as writing at any size.
+        IconKind.NOTE -> {
+            line(0.2f, 0.28f, 0.8f, 0.28f)
+            line(0.2f, 0.5f, 0.8f, 0.5f)
+            line(0.2f, 0.72f, 0.55f, 0.72f)
+        }
         // Two arrowheads pushing apart: more of the file above and more of it below.
         IconKind.EXPAND -> {
             line(0.5f, 0.14f, 0.5f, 0.42f)

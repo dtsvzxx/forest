@@ -169,6 +169,45 @@ class AppRenderTest {
         )
     }
 
+    /**
+     * The note button is on the pane's own header, so sending an idea to an agent is a click
+     * rather than a right-click through a menu of eight other things.
+     */
+    @Test
+    fun `a pane header sends a note without going through the context menu`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.addNote()
+            state.updateNote(state.selectedNote!!, "Rewrite the pty layer on FFM")
+            state.switchTo(AppMode.AGENTS)
+            state.openAgent(state.worktrees.first())
+            scene.render()
+            scene.render()
+
+            // Sixth button from the right edge of a full-width header: close, zoom, split down,
+            // split right, go to worktree, and then this one.
+            val spot = Offset(NOTE_BUTTON_X, PANE_HEADER_Y)
+            scene.sendPointerEvent(PointerEventType.Move, spot)
+            scene.sendPointerEvent(PointerEventType.Press, spot, button = PointerButton.Primary)
+            scene.sendPointerEvent(PointerEventType.Release, spot, button = PointerButton.Primary)
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-agent-note.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        assertEquals(state.agents.single().id, state.noteRequest, "the picker should have opened for this pane")
+    }
+
     @Test
     fun `renders the picker that sends a note to an agent`() {
         val state = fakeState(worktrees = 2)
@@ -1069,6 +1108,17 @@ class AppRenderTest {
 
         /** Height of a row in the worktree picker. */
         const val PICKER_ROW_HEIGHT = 26f
+
+        /** Middle of a single pane's header: the wall starts under two toolbars, then 2dp of inset. */
+        const val PANE_HEADER_Y = 87f
+
+        /**
+         * Centre of the note button on a full-width pane header.
+         *
+         * The buttons are 20dp wide, 6dp apart, and the row ends 2dp from the window's edge, so
+         * they count back from there: close, zoom, split down, split right, go to worktree, note.
+         */
+        const val NOTE_BUTTON_X = WIDTH - 2f - 10f - 5 * 26f
 
         /** `WorktreeColors.separator` — Gray3, the one divider colour visible on the editor. */
         const val SEPARATOR = 0x393B40

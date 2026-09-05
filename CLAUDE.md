@@ -777,9 +777,15 @@ takes the lock like every other one.
 ## Notes
 
 The Notes tab is a per-project scratchpad for ideas **written as prompts**, and its other half is on
-the agent wall: a pane's context menu offers *Send note…*, the picker lists the project's notes, and
-the chosen one is handed to the running agent as if it had been pasted and submitted. Writing an
-idea down is only worth doing because using it later costs one right-click.
+the agent wall: a pane's header carries a note button, the picker lists the project's notes, and the
+chosen one is handed to the running agent as if it had been pasted and submitted. Writing an idea
+down is only worth doing because using it later costs one click.
+
+That button appears **only once the project has a note**, and the context menu keeps the entry
+either way — a button whose every press could say no more than "nothing written down yet" is
+furniture on the header of everyone who does not keep notes, while the menu is where the feature can
+still announce itself. `a pane header sends a note without going through the context menu` drives a
+real click at it.
 
 - **A note has no title.** Its first non-blank line is the name and the second is the preview
   (`model/Note.kt`) — naming a thought is a second job, and nobody does it when the thought is the
