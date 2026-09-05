@@ -43,7 +43,7 @@ dependencies {
  * anyone: a downloaded copy carries the quarantine flag and Gatekeeper refuses it. That needs a
  * Developer ID identity and notarization, and neither belongs in a repository.
  */
-val appVersion = "1.0.0"
+val appVersion = "1.1.0"
 
 /** The Developer ID team this is signed and notarized under. */
 val TEAM_ID = "7FCH84EN89"
