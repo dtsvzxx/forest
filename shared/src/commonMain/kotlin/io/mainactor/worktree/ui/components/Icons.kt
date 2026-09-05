@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, TASK,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, TASK, MAXIMIZE, RESTORE,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -48,12 +48,46 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
     fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
         drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = stroke.width, cap = StrokeCap.Round)
 
+    /**
+     * One corner bracket of the maximise/restore pair.
+     *
+     * [x] and [y] are its elbow, and the arms run back towards the middle of the icon when [out] —
+     * so an elbow at a *far* corner points outwards — and away from it when not. Written once
+     * because eight hand-placed brackets are eight chances to put one arm a hundredth out.
+     */
+    fun corner(x: Float, y: Float, out: Boolean) {
+        val arm = 0.2f
+        val dx = if (x < 0.5f) arm else -arm
+        val dy = if (y < 0.5f) arm else -arm
+        val (ax, ay) = if (out) (x + dx) to y else (x - dx) to y
+        val (bx, by) = if (out) x to (y + dy) else x to (y - dy)
+        line(x, y, ax, ay)
+        line(x, y, bx, by)
+    }
+
     when (icon) {
         IconKind.PLUS -> {
             line(0.5f, 0.18f, 0.5f, 0.82f)
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
+        // Four corners pushing outwards, and the same four turned around. A plus and a minus were
+        // standing here, which is what the button beside them means — "add a pane" — while this one
+        // means "give this pane the whole wall". Corner brackets are what every player and every
+        // window manager uses for it, and they are also *a pair*: the restore glyph is legibly the
+        // same mark reversed, which a minus can never be.
+        IconKind.MAXIMIZE -> {
+            corner(0.16f, 0.16f, out = true)
+            corner(0.84f, 0.16f, out = true)
+            corner(0.16f, 0.84f, out = true)
+            corner(0.84f, 0.84f, out = true)
+        }
+        IconKind.RESTORE -> {
+            corner(0.36f, 0.36f, out = false)
+            corner(0.64f, 0.36f, out = false)
+            corner(0.36f, 0.64f, out = false)
+            corner(0.64f, 0.64f, out = false)
+        }
         // A ticked line over an unticked one: a checklist, not a page. At 11dp a box with a rule
         // beside it is a smudge, so the tick stands on its own and the rules say what it is for.
         IconKind.TASK -> {

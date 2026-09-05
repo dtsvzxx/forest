@@ -351,7 +351,7 @@ private fun AgentPaneHeader(
             tint = colors.textDim,
         )
         ToolButton(
-            icon = if (zoomed) IconKind.MINUS else IconKind.PLUS,
+            icon = if (zoomed) IconKind.RESTORE else IconKind.MAXIMIZE,
             tooltip = if (zoomed) "Restore this pane to the wall" else "Zoom this pane to the whole wall",
             detail = AgentShortcuts.zoomPane,
             onClick = { state.toggleAgentZoom(session.id) },
