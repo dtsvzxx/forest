@@ -807,9 +807,15 @@ down is only worth doing because using it later costs one click.
   `agents.json` is: a prompt is many lines of arbitrary text, which no line-per-entry format holds.
   It sits beside the machine's other preferences rather than in the repository — a working list is
   not something to put in front of everyone who clones it, nor into the diffs and merge conflicts
-  that living in a worktree would cost it. **`notes.json` is read when there is no `tasks.json`
-  yet** and never written back: the tab was called Notes for one release, the entries are the same
-  shape, and leaving the old file where it is costs kilobytes.
+  that living in a worktree would cost it.
+- **`notes.json` is read *behind* `tasks.json`, not instead of it**, and never written to. The tab
+  was called Notes for one release and the entries are the same shape, so the migration is only a
+  matter of reading the old name — but `tasks.json` appears the moment *any one* project is edited,
+  and a store keyed on that file's existence takes every other project's entries off the screen at
+  that instant while leaving them on disk. The two are merged per project, the new file winning,
+  and the next write of a project folds its entries over. That is also why `save` writes an **empty
+  list** rather than skipping it: an emptied project has to stay empty instead of being refilled
+  from the old file. `TaskStoreTest` pins both halves, and each fails on its own when reverted.
 
 **Delivery is the backend's business, not `AppState`'s.** `AppState` calls `onSendPrompt(sessionId,
 text)`, which `main.kt` binds to `TerminalBackend.sendPrompt`; only the engine knows whether the

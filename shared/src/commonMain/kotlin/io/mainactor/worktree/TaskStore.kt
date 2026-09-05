@@ -34,18 +34,21 @@ class TaskStore(private val fs: FileSystemAccess) {
     /**
      * What this file was called when a task was still called a note.
      *
-     * Read only when there is no `tasks.json` yet, and never written back: the entries are the same
-     * shape, so the whole migration is reading the old name once. Leaving the old file where it is
-     * costs a few kilobytes and means a downgrade still finds its data.
+     * Read behind `tasks.json` rather than instead of it, and never written to. The two are merged
+     * **per project**, because the new file appears the moment any one project is edited: keyed
+     * only on the file's existence, everything written under the old name for every *other*
+     * project would go quiet at that moment — the data still on disk and nothing on screen. A
+     * project present in both takes the new file, and rewriting that project folds its entries
+     * over. Leaving the old file where it is costs a few kilobytes.
      */
     private val legacyFile get() = fs.resolve(dir, "notes.json")
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun load(): Map<String, List<Task>> = when {
-        fs.exists(file) -> parse(file)
-        fs.exists(legacyFile) -> parse(legacyFile)
-        else -> emptyMap()
+    fun load(): Map<String, List<Task>> {
+        val legacy = if (fs.exists(legacyFile)) parse(legacyFile) else emptyMap()
+        val current = if (fs.exists(file)) parse(file) else emptyMap()
+        return legacy + current
     }
 
     private fun parse(path: String): Map<String, List<Task>> = runCatching {
@@ -76,7 +79,9 @@ class TaskStore(private val fs: FileSystemAccess) {
             fs.createDirectories(dir)
             val root = buildJsonObject {
                 all.forEach { (path, tasks) ->
-                    if (tasks.isEmpty()) return@forEach
+                    // An empty list is written, not skipped: it is what says "this project was
+                    // migrated and then emptied", and without it the entries under the old name
+                    // would come back on the next start.
                     put(path, buildJsonArray {
                         tasks.forEach { task ->
                             add(buildJsonObject {
