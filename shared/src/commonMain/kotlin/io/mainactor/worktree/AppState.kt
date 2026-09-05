@@ -78,11 +78,28 @@ data class CommandFailure(
     val output: String,
 )
 
-/** One embedded terminal tab. */
+/**
+ * One embedded terminal tab.
+ *
+ * The name is kept in pieces rather than as one string, because the wall draws them differently
+ * and a header that is one label cannot say which of several repositories a pane is in — which was
+ * exactly the complaint: "main · 2" names a branch that half the repositories on the wall also
+ * have, and the ordinal says nothing at all.
+ */
 data class TerminalSession(
     val id: String,
-    val title: String,
+    /** The worktree's own label — its branch, normally; see [Worktree.label]. */
+    val label: String,
     val workDir: String,
+    /**
+     * The repository's name, when it is worth saying.
+     *
+     * Null for a tool-window tab: those all belong to the project the window has open, so naming
+     * it on every tab is noise. The agent wall sets it, because there it is the missing half.
+     */
+    val projectName: String? = null,
+    /** Which agent, and which of several panes on the same worktree — "Claude 2", or just "2". */
+    val agentLabel: String? = null,
     /** The repository this pane's worktree belongs to; agents may span several. */
     val projectPath: String? = null,
     /**
@@ -93,7 +110,10 @@ data class TerminalSession(
     val command: String? = null,
     /** Which agent this pane was started as, for the header and for the picker's default. */
     val agentId: String? = null,
-)
+) {
+    /** One line, for anything with room for only one — a tab, a widget's name, a test. */
+    val title: String get() = listOfNotNull(projectName, label, agentLabel).joinToString(" · ")
+}
 
 /** A pending "start an agent" request, waiting for the user to say where. */
 data class AgentRequest(
@@ -1206,7 +1226,7 @@ class AppState(
         terminalSeq++
         val session = TerminalSession(
             id = "term-$terminalSeq-${target.path.hashCode()}",
-            title = target.label,
+            label = target.label,
             workDir = target.path,
         )
         terminals = terminals + session
@@ -1397,11 +1417,15 @@ class AppState(
     ) {
         terminalSeq++
         val ordinal = agents.count { it.workDir == target.path } + 1
-        val label = if (agent == null || agent.isShell) "$ordinal" else "${agent.name} $ordinal"
         val session = TerminalSession(
             id = "agent-$terminalSeq-${target.path.hashCode()}",
-            title = "${target.label} · $label",
+            label = target.label,
             workDir = target.path,
+            // Taken from the path rather than from `project`, because a pane may be running in a
+            // repository this window does not have open — which is the whole reason the wall has
+            // to say which one it is.
+            projectName = projectPath?.let(fs::nameOf),
+            agentLabel = if (agent == null || agent.isShell) "$ordinal" else "${agent.name} $ordinal",
             projectPath = projectPath,
             command = command,
             agentId = agent?.id,

@@ -290,6 +290,19 @@ a split is precisely how one starts somewhere else. The picker is seeded from
 `focusedAgentSession`, which is why `TerminalSession` carries a `projectPath` — the wall can hold
 panes from repositories the rest of the window does not have open.
 
+**A pane's name is kept in pieces, not as one string.** `TerminalSession` carries `projectName`,
+`label` (the worktree's, normally its branch) and `agentLabel` ("Claude Code 2"), and derives
+`title` from them for the places with room for only one line — a tool-window tab, a widget's name.
+The header used to read "main · 2", which names a branch that half the repositories on the wall
+also have and an ordinal that says nothing, with the repository missing entirely — on the one
+screen that holds panes from several at once. Only the worktree is weighted, and with
+`fill = false`: branch names are the long ones, so it is the part that gives way, while a weight
+that *filled* would fling the pane's number to the far right where it reads as part of the usage
+badge. `an agent pane is named by its repository, its worktree and its agent` pins the parts; a
+tool-window tab sets neither of the other two, because those all belong to the open project and
+naming it on every tab is noise. The weight goes on a `Box` around the `Tooltip`, for the same
+reason it does around a `ContextMenuArea` — `TooltipArea` wraps its content in a layout of its own.
+
 Navigation runs both ways: a worktree's menu starts or focuses an agent
 (`startAgentFor`/`focusAgentFor`), and a pane's `showWorktreeInProject` goes back, opening the
 pane's own repository first when it is not the loaded one — which is why `openProjectAt` takes a

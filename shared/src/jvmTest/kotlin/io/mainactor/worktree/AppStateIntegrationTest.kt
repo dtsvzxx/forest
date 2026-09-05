@@ -3,6 +3,7 @@ package io.mainactor.worktree
 import io.mainactor.worktree.git.Git
 import io.mainactor.worktree.model.Branch
 import io.mainactor.worktree.model.AgentSpec
+import io.mainactor.worktree.model.BuiltInAgents
 import io.mainactor.worktree.model.Project
 import io.mainactor.worktree.model.ProjectAgents
 import io.mainactor.worktree.model.SplitAxis
@@ -1230,8 +1231,49 @@ class AppStateIntegrationTest {
 
         assertEquals(3, state.agents.size)
         assertTrue(state.agents.all { it.workDir == worktree.path })
-        assertEquals(listOf("main · 1", "main · 2", "main · 3"), state.agents.map { it.title })
+        assertEquals(listOf("1", "2", "3"), state.agents.map { it.agentLabel })
         assertEquals(state.agents.last().id, state.focusedAgent)
+    }
+
+    /**
+     * A pane says which repository it is in, and the wall is the reason.
+     *
+     * Panes come from repositories this window does not have open, so a header naming only the
+     * branch — "main · 2" — names something half the repositories on the wall also have, and the
+     * ordinal says nothing at all. The parts are separate because the header draws them
+     * differently and only one of them may be truncated.
+     */
+    @Test
+    fun `an agent pane is named by its repository, its worktree and its agent`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val path = File(root, "side").path
+        state.createWorktree(path, "side", null, "main", force = false).join()
+        val side = state.worktrees.single { it.branch == "side" }
+
+        state.openAgent(side, agent = BuiltInAgents.CLAUDE)?.join()
+
+        val pane = state.agents.single()
+        assertEquals("repo", pane.projectName)
+        assertEquals("side", pane.label)
+        assertEquals("Claude Code 1", pane.agentLabel)
+        assertEquals("repo · side · Claude Code 1", pane.title)
+    }
+
+    /** A tool-window tab is always in the open project, so naming it on every tab is noise. */
+    @Test
+    fun `a terminal tab is named by its worktree alone`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+
+        state.openTerminal()
+
+        val tab = state.terminals.single()
+        assertEquals("main", tab.title)
+        assertNull(tab.projectName)
+        assertNull(tab.agentLabel)
     }
 
     @Test

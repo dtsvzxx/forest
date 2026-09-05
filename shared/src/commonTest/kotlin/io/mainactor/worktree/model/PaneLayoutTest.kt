@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 class PaneLayoutTest {
 
-    private fun pane(id: String) = TerminalSession(id = id, title = id, workDir = "/repo")
+    private fun pane(id: String) = TerminalSession(id = id, label = id, workDir = "/repo")
     private fun leaf(id: String) = PaneNode.Leaf(pane(id))
 
     @Test

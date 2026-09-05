@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -288,15 +289,7 @@ private fun AgentPaneHeader(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         IdeIcon(IconKind.TERMINAL, if (focused) colors.accent else colors.textDim, size = 11.dp)
-        Text(
-            text = session.title,
-            color = if (focused) colors.text else colors.textDim,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        PaneName(session, focused, Modifier.weight(1f))
         state.agentUsage[session.workDir]?.takeIf { !it.isEmpty }?.let { usage ->
             Tooltip(
                 text = "Agent usage in ${session.workDir.substringAfterLast('/')}",
@@ -376,6 +369,69 @@ private fun AgentPaneHeader(
     }
 }
 
+/**
+ * Which repository, which worktree, and which agent — in that order.
+ *
+ * Three pieces rather than one string, because they are not equally important and the header is
+ * narrow. A pane used to be labelled "main · 2", which names a branch that half the repositories on
+ * the wall also have and an ordinal that says nothing; the repository was missing entirely, and the
+ * wall is precisely the place that holds panes from several at once.
+ *
+ * Only the worktree is weighted, so it is the one that gives way — branch names are the long ones
+ * here ("NOTASK-partial-payments-…"), while a repository name and "Claude 2" are short and are the
+ * two halves of "which pane is this". The full path is a hover away, the way every other row in
+ * this window does it.
+ */
+@Composable
+private fun PaneName(session: TerminalSession, focused: Boolean, modifier: Modifier = Modifier) {
+    val colors = LocalWorktreeColors.current
+    // The weight goes on a Box *around* the tooltip, for the same reason it does around a context
+    // menu: `TooltipArea` wraps its content in a layout of its own, and a weight handed to
+    // something inside that wrapper is invisible to the header's Row.
+    Box(modifier) {
+        Tooltip(text = session.workDir, detail = session.command) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                session.projectName?.let { project ->
+                    Text(
+                        text = project,
+                        color = colors.textDim,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = PROJECT_NAME_MAX),
+                    )
+                    Text("/", color = colors.textDisabled, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    text = session.label,
+                    color = if (focused) colors.text else colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // `fill = false`: the branch may shrink to fit, but it must not stretch, or
+                    // the pane's number is flung to the far right where it reads as part of the
+                    // usage badge instead of as part of the name.
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                session.agentLabel?.let { agent ->
+                    Text("·", color = colors.textDisabled, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = agent,
+                        color = colors.textDisabled,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AgentsToolbar(state: AppState, onAddAgent: () -> Unit) {
     val colors = LocalWorktreeColors.current
@@ -443,3 +499,6 @@ private fun Divider() {
 
 /** How often the wall re-reads the usage transcripts while it is on screen. */
 private const val USAGE_POLL_MS = 4_000L
+
+/** A repository name is short; past this it is eating the branch's room rather than saying more. */
+private val PROJECT_NAME_MAX = 110.dp
