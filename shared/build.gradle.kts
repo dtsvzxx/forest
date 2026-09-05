@@ -24,6 +24,24 @@ kotlin {
             // are no @Serializable classes and the serialization compiler plugin is not needed.
             implementation(libs.kotlinx.serializationJson)
         }
+        jvmMain.dependencies {
+            // Syntax highlighting for the diff view. Real parsers rather than regular expressions,
+            // which is what makes a `//` inside a string stay a string — see `TreeSitterHighlighter`
+            // for what that costs and what it buys.
+            implementation(libs.treesitter.core)
+            implementation(libs.treesitter.kotlin)
+            implementation(libs.treesitter.java)
+            implementation(libs.treesitter.javascript)
+            implementation(libs.treesitter.typescript)
+            implementation(libs.treesitter.python)
+            implementation(libs.treesitter.go)
+            implementation(libs.treesitter.rust)
+            implementation(libs.treesitter.c)
+            implementation(libs.treesitter.bash)
+            implementation(libs.treesitter.json)
+            implementation(libs.treesitter.yaml)
+            implementation(libs.treesitter.markdown)
+        }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }

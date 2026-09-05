@@ -34,6 +34,7 @@ import io.mainactor.worktree.platform.CommandResult
 import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.platform.FileSystemAccess
 import io.mainactor.worktree.platform.ShellRunner
+import io.mainactor.worktree.platform.SyntaxHighlighter
 import io.mainactor.worktree.platform.SystemIntegration
 import io.mainactor.worktree.usage.UsageReader
 import io.mainactor.worktree.usage.WorktreeUsage
@@ -113,6 +114,8 @@ class AppState(
     private val chooser: DirectoryChooser,
     /** Runs a project's own commands, with no terminal attached. */
     private val shell: ShellRunner,
+    /** Colours the diff. Injected like every other platform thing; absent in a render test. */
+    val highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
     val system: SystemIntegration,
     private val scope: CoroutineScope,
     /** Lets the platform layer tear down the shell process behind a terminal tab we drop. */

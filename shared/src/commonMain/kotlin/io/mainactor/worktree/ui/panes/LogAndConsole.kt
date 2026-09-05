@@ -105,6 +105,7 @@ fun LogPane(state: AppState, modifier: Modifier = Modifier) {
                 DiffView(
                     diff = state.commitFile,
                     loading = state.commitDiffLoading,
+                    highlighter = state.highlighter,
                     emptyText = if (state.selectedCommit == null) {
                         "Select a commit above to see what it changed."
                     } else {

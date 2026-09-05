@@ -103,6 +103,7 @@ fun ChangesPane(
                 DiffView(
                     diff = state.diff,
                     loading = state.diffLoading,
+                    highlighter = state.highlighter,
                     emptyText = when (state.diffMode) {
                         DiffMode.WORKING_TREE -> "Select a changed file above."
                         DiffMode.AGAINST_BASE -> "Select a file above."

@@ -24,6 +24,7 @@ import io.mainactor.worktree.platform.JvmShellRunner
 import io.mainactor.worktree.platform.Os
 import io.mainactor.worktree.platform.ProcessCommandRunner
 import io.mainactor.worktree.platform.SwingDirectoryChooser
+import io.mainactor.worktree.platform.TreeSitterHighlighter
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.terminal.AgentKeyBindings
 import io.mainactor.worktree.terminal.defaultAgentBindings
@@ -205,6 +206,7 @@ private fun rememberAppState(terminals: TerminalBackend): AppState {
             store = ProjectStore(fs),
             chooser = SwingDirectoryChooser(),
             shell = JvmShellRunner(),
+            highlighter = TreeSitterHighlighter(),
             system = DesktopSystemIntegration(),
             scope = scope,
             onTerminalDisposed = terminals::close,

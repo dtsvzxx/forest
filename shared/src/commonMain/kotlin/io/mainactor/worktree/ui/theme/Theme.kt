@@ -67,6 +67,16 @@ data class WorktreeColors(
     // Diff view
     val diffAddedBg: Color,
     val diffDeletedBg: Color,
+
+    // Syntax colouring, from the same editor scheme the diff colours come from. Each carries the
+    // attribute it stands for rather than a name of our own, so a value can be checked against the
+    // scheme instead of argued about.
+    val syntaxKeyword: Color,
+    val syntaxString: Color,
+    val syntaxComment: Color,
+    val syntaxNumber: Color,
+    val syntaxType: Color,
+    val syntaxAnnotation: Color,
     val diffHunkBg: Color,
     val diffGutterText: Color,
 
@@ -124,6 +134,13 @@ val NewUiDarkColors = WorktreeColors(
 
     diffAddedBg = Color(0xFF294436),    // DIFF_INSERTED
     diffDeletedBg = Color(0xFF484A4A),  // DIFF_DELETED
+
+    syntaxKeyword = Color(0xFFCF8E6D),    // DEFAULT_KEYWORD
+    syntaxString = Color(0xFF6AAB73),     // DEFAULT_STRING
+    syntaxComment = Color(0xFF7A7E85),    // DEFAULT_LINE_COMMENT
+    syntaxNumber = Color(0xFF2AACB8),     // DEFAULT_NUMBER
+    syntaxType = Color(0xFFB5B6E3),       // DEFAULT_CLASS_NAME
+    syntaxAnnotation = Color(0xFFB3AE60), // DEFAULT_METADATA
     diffHunkBg = Color(0xFF2B2D30),
     diffGutterText = Color(0xFF606366), // LINE_NUMBERS_COLOR
 

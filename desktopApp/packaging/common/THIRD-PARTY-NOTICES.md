@@ -33,6 +33,15 @@ Sources: https://github.com/JetBrains/pty4j
 ## MIT
 
 - `org.slf4j:slf4j-api` — Copyright (c) 2004-2025 QOS.ch All rights reserved.
+- `io.github.bonede:tree-sitter` and its grammars: `tree-sitter-kotlin`, `tree-sitter-java`,
+  `tree-sitter-javascript`, `tree-sitter-typescript`, `tree-sitter-python`, `tree-sitter-go`,
+  `tree-sitter-rust`, `tree-sitter-c`, `tree-sitter-bash`, `tree-sitter-json`, `tree-sitter-yaml`,
+  `tree-sitter-markdown`
+
+The parsers that colour a diff. Shipped unmodified, native parser libraries included — they live
+inside the jars and are re-signed by `hardenEmbeddedNatives` like every other buried binary.
+Sources: https://github.com/bonede/tree-sitter-ng, which packages the grammars from
+https://github.com/tree-sitter
 
 ## Apache License 2.0
 

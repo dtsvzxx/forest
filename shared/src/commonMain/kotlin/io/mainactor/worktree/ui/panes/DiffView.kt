@@ -23,6 +23,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import io.mainactor.worktree.platform.SyntaxHighlighter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -56,6 +60,7 @@ fun DiffView(
     loading: Boolean,
     modifier: Modifier = Modifier,
     emptyText: String = "Select a file to see its diff.",
+    highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
 ) {
     val colors = LocalWorktreeColors.current
 
@@ -91,6 +96,15 @@ fun DiffView(
         }
     }
 
+    // Parsed once per patch, not per frame and not per row: a file is milliseconds of work and a
+    // list scrolls past it hundreds of times.
+    val tokens = remember(diff, highlighter) { DiffHighlighting.of(diff, highlighter) }
+    val lineIndex = remember(rows) {
+        // Where each row sits among the lines, since the headers between them are not lines.
+        var line = -1
+        rows.map { row -> if (row is DiffRow.Line) ++line else -1 }
+    }
+
     // Monospace: one measurement of a single glyph gives the width of every column.
     val measurer = rememberTextMeasurer()
     val charWidthPx = remember(measurer) { measurer.measure("0", CodeTextStyle).size.width.toFloat() }
@@ -113,7 +127,12 @@ fun DiffView(
                 items(rows.size, key = { it }) { index ->
                     when (val row = rows[index]) {
                         is DiffRow.Header -> HunkHeaderRow(row.text, contentWidth, hScroll)
-                        is DiffRow.Line -> DiffLineRow(row.line, contentWidth, hScroll)
+                        is DiffRow.Line -> DiffLineRow(
+                            line = row.line,
+                            tokens = tokens.getOrNull(lineIndex[index]) ?: LineTokens.NONE,
+                            contentWidth = contentWidth,
+                            hScroll = hScroll,
+                        )
                     }
                 }
             }
@@ -154,6 +173,7 @@ private fun HunkHeaderRow(
 @Composable
 private fun DiffLineRow(
     line: DiffLine,
+    tokens: LineTokens,
     contentWidth: androidx.compose.ui.unit.Dp,
     hScroll: androidx.compose.foundation.ScrollState,
 ) {
@@ -187,13 +207,37 @@ private fun DiffLineRow(
         }
         Box(Modifier.weight(1f).horizontalScroll(hScroll)) {
             Text(
-                text = marker + line.text,
+                text = annotate(marker, line.text, tokens, colors),
                 style = CodeTextStyle,
                 color = textColor,
                 softWrap = false,
                 maxLines = 1,
                 modifier = Modifier.width(contentWidth).padding(start = 4.dp),
             )
+        }
+    }
+}
+
+/**
+ * The line's text with its colours attached, or the plain string when there are none.
+ *
+ * The marker (`+`, `-`, a space) is part of the same text so the columns line up with the hunk
+ * headers, which means every span moves along by one.
+ */
+private fun annotate(
+    marker: String,
+    text: String,
+    tokens: LineTokens,
+    colors: io.mainactor.worktree.ui.theme.WorktreeColors,
+): AnnotatedString {
+    if (tokens.spans.isEmpty()) return AnnotatedString(marker + text)
+    return buildAnnotatedString {
+        append(marker)
+        append(text)
+        tokens.spans.forEach { span ->
+            val from = span.start + marker.length
+            val to = minOf(span.end + marker.length, length)
+            if (to > from) addStyle(SpanStyle(color = span.kind.colour(colors)), from, to)
         }
     }
 }

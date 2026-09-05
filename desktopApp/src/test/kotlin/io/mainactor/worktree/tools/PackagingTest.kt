@@ -26,7 +26,7 @@ class PackagingTest {
 
         // JediTerm is LGPL 3.0, pty4j is EPL 1.0, JNA is LGPL/Apache dual, SLF4J is MIT — each
         // read from the artifact's own POM, except SLF4J's, which declares none.
-        listOf("jediterm", "pty4j", "jna", "slf4j").forEach { module ->
+        listOf("jediterm", "pty4j", "jna", "slf4j", "tree-sitter").forEach { module ->
             assertTrue(module in text, "$module is bundled but not mentioned in the notices")
         }
         listOf("LGPL", "Eclipse Public License", "MIT").forEach { licence ->

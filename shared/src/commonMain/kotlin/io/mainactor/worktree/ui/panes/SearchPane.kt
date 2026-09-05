@@ -104,6 +104,7 @@ fun SearchPane(state: AppState, modifier: Modifier = Modifier) {
                 DiffView(
                     diff = state.fileDiff,
                     loading = state.fileDiffLoading,
+                    highlighter = state.highlighter,
                     emptyText = when {
                         state.searchFile == null -> "Find a file above to see where it changed."
                         state.fileCommits.isEmpty() -> "No commit has touched this file."
