@@ -47,6 +47,23 @@ class TerminalLine(width: Int) {
 
     fun styleAt(column: Int): Long = styles[column]
 
+    /**
+     * A row a resize may drop: blank, unwrapped, and carrying nothing but the erase style.
+     *
+     * The screen is always as tall as the terminal, so one with a prompt on its second line holds
+     * the rest as padding. A rewrap that counts those rows as content pushes real text off the top
+     * and into history, and the person dragging the splitter watches the first half of every long
+     * line disappear. They are re-added after the rewrap, which is why the style has to match: a
+     * row of coloured blanks is something a program painted, not padding.
+     */
+    fun isPadding(style: Long): Boolean {
+        if (wrapped) return false
+        for (column in 0 until width) {
+            if (codePoints[column] != EMPTY || styles[column] != style) return false
+        }
+        return true
+    }
+
     fun set(column: Int, codePoint: Int, style: Long) {
         codePoints[column] = codePoint
         styles[column] = style

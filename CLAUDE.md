@@ -426,7 +426,17 @@ here", and only the second may be undone. Four rules, each with a test that name
   from under the person typing into it — which is why the cursor goes into the resize in document
   coordinates and comes back in them;
 - a double-width character is never split across the new edge, and narrow → wide → narrow gives
-  back what was there.
+  back what was there;
+- **the blank rows below the cursor are padding, not content.** A screen is always as tall as the
+  terminal, so one with a prompt on its second line carries the rest as blanks; counted as content,
+  they leave the rewrap no room and it pushes real text off the top into history. What the user sees
+  is the first half of every long line vanishing as they drag the splitter, with the remainder
+  starting mid-word — this app's own agent panes, on this machine. `TerminalBuffer.resize` drops
+  them before the rewrap (`TerminalLine.isPadding`, which insists on the erase style, since a row of
+  coloured blanks is something a program painted) and the screen is padded out again afterwards. A
+  screen that is genuinely full still gives ground, because there is nowhere else to put the rows.
+  Both halves are named by tests, and the reason every earlier test missed this is worth keeping:
+  they read the *document*, where nothing was ever lost, rather than the screen.
 
 **Every line in the buffer is exactly `columns` wide, and a resize is what breaks that silently.**
 The painter walks a row to `model.columns` and the emulator writes at `cursorColumn`, neither
@@ -470,7 +480,10 @@ table rather than one generated from `EastAsianWidth.txt`; and there is no confo
 `JediTermDifferentialTest` is what stands in for one.
 
 `LiveTerminalTest` is the one place the halves are checked together — a real `/bin/sh` on a real
-pty, chunked however the kernel chose, drawn by the emulator.
+pty, chunked however the kernel chose, drawn by the emulator. `LiveResizeTest` joins the other two:
+the view measures itself and the pty carries a size, each proved separately, and neither says the
+two are wired to each other — so it lays a real pane out narrow, widens it, and asks the shell
+itself what `stty size` says.
 
 #### Recorded streams, and the reference beside them
 

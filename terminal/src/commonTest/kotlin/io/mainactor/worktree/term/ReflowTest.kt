@@ -34,6 +34,42 @@ class ReflowTest {
         assertEquals("ghijkl", document[first + 1], "the second half should follow the first")
     }
 
+    /**
+     * The screen has room for the extra rows a rewrap makes, so nothing may leave it.
+     *
+     * A screen is always `rows` tall, so one with a prompt on its second line carries the rest as
+     * blank padding. Counted as content, that padding makes a rewrap push real text off the top and
+     * into history — the person dragging the splitter sees the first half of every long line
+     * vanish, and what is left starts mid-sentence. The text was never lost, only scrolled away,
+     * which is why every test that looked at the document missed it.
+     */
+    @Test
+    fun `rewrapping does not push the screen's own text into its history`() {
+        val terminal = terminal(columns = 12, rows = 6)
+        terminal.feed("abcdefghijkl\r\nsecond\r\n")
+
+        terminal.resize(6, 6)
+
+        assertEquals(
+            listOf("abcdef", "ghijkl", "second"),
+            terminal.screenText().lines().take(3),
+            "the rewrapped line should still be on screen",
+        )
+        assertEquals(0, terminal.buffer.scrollbackSize, "nothing scrolled away: the screen had room")
+    }
+
+    /** And a screen that is genuinely full still scrolls, because there is nowhere else to put it. */
+    @Test
+    fun `rewrapping a full screen still moves the oldest rows into history`() {
+        val terminal = terminal(columns = 12, rows = 3)
+        terminal.feed("abcdefghijkl\r\nsecond\r\nthird")
+
+        terminal.resize(6, 3)
+
+        assertTrue(terminal.buffer.scrollbackSize > 0, "a full screen has to give ground")
+        assertEquals(listOf("ghijkl", "second", "third"), terminal.screenText().lines())
+    }
+
     /** And widening puts back together what a narrower pane had to break. */
     @Test
     fun `widening rejoins what wrapping split`() {

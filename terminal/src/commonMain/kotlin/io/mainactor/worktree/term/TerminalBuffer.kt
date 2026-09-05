@@ -135,6 +135,10 @@ class TerminalBuffer(
         alternate = fit(alternate, columns, rows, style)
 
         val document = history.toMutableList().apply { addAll(primary) }
+        // The blank rows below the cursor are padding rather than content, and dropping them
+        // before the rewrap is what keeps the extra lines it produces on screen instead of
+        // scrolling the top of the document away. They are put back at the end.
+        trimPaddingBelow(document, cursor.line, style)
         val result = Reflow.rewrap(document, columns, cursor)
         this.columns = columns
         this.rows = rows
@@ -157,6 +161,21 @@ class TerminalBuffer(
             )
         }
         return TerminalPosition(result.cursor.line - screenFrom + scrollbackSize, result.cursor.column)
+    }
+
+    /**
+     * Drops the blank rows a screen carries below its cursor.
+     *
+     * Never the cursor's own row, and never anything above it: those are where the program is
+     * working. Everything below is the terminal's own padding, and counting it as content is what
+     * made a rewrap eat the top of the screen.
+     */
+    private fun trimPaddingBelow(document: MutableList<TerminalLine>, cursorLine: Int, style: Long) {
+        if (document.isEmpty()) return
+        val cursorIndex = cursorLine.coerceIn(0, document.lastIndex)
+        var end = document.size
+        while (end > cursorIndex + 1 && document[end - 1].isPadding(style)) end--
+        if (end < document.size) document.subList(end, document.size).clear()
     }
 
     /** Only the alternate screen is fitted this way; it keeps no history to move rows into. */
