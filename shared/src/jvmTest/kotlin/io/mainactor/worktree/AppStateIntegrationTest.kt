@@ -11,6 +11,7 @@ import io.mainactor.worktree.model.RepoOperation
 import io.mainactor.worktree.model.Resolution
 import io.mainactor.worktree.platform.DesktopSystemIntegration
 import io.mainactor.worktree.platform.DirectoryChooser
+import io.mainactor.worktree.platform.FileSystemAccess
 import io.mainactor.worktree.usage.ClaudeUsageSource
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
@@ -88,8 +89,17 @@ class AppStateIntegrationTest {
     }
 
     /** An [AppState] whose "home" is inside the temp tree, so the recent list never escapes it. */
-    private fun CoroutineScope.newState(onTerminalDisposed: (String) -> Unit = {}): AppState {
-        val fs = JvmFileSystemAccess(home = homeDir.path)
+    private fun CoroutineScope.newState(
+        onTerminalDisposed: (String) -> Unit = {},
+        onSendPrompt: (String, String) -> Unit = { _, _ -> },
+        // Stopping the clock is how the id tests reach the case that only happens when two things
+        // are created inside the same millisecond.
+        now: (() -> Long)? = null,
+    ): AppState {
+        val real = JvmFileSystemAccess(home = homeDir.path)
+        val fs = if (now == null) real else object : FileSystemAccess by real {
+            override fun now(): Long = now()
+        }
         var sink: ((io.mainactor.worktree.git.GitLogEntry) -> Unit)? = null
         return AppState(
             git = Git(ProcessCommandRunner(), fs, gitPath, onLog = { sink?.invoke(it) }),
@@ -102,6 +112,7 @@ class AppStateIntegrationTest {
             system = DesktopSystemIntegration(),
             scope = this,
             onTerminalDisposed = onTerminalDisposed,
+            onSendPrompt = onSendPrompt,
         ).also { sink = it::recordGitLog }
     }
 
@@ -1419,5 +1430,114 @@ class AppStateIntegrationTest {
 
         assertTrue(state.status.conflicts.isEmpty())
         assertEquals("A\nb\nc\nd\nE\n", File(mainRepo, "multi.txt").readText())
+    }
+
+    @Test
+    fun `notes are kept per project and survive reopening it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val other = newRepository("other-repo")
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+
+        state.addNote()
+        state.updateNote(state.selectedNote!!, "Rewrite the pty layer using FFM.")
+
+        // A different project starts empty: notes belong to the repository they were thought about.
+        state.openProject(other.path).join()
+        assertTrue(state.notes.isEmpty())
+
+        state.openProject(mainRepo.path).join()
+        assertEquals(listOf("Rewrite the pty layer using FFM."), state.notes.map { it.body })
+
+        // And a fresh window reads them off disk rather than out of this one's memory.
+        val reopened = newState()
+        reopened.openProject(mainRepo.path).join()
+        assertEquals(listOf("Rewrite the pty layer using FFM."), reopened.notes.map { it.body })
+    }
+
+    /**
+     * Ids are what the editor writes through, so two live notes may never share one.
+     *
+     * The case is a deletion from the middle of the list: an id derived from the list's length
+     * hands the next note the id of one still in it, and typing into either then edits both.
+     */
+    @Test
+    fun `a note added after a deletion does not collide with a surviving one`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState(now = { 1_700_000_000_000 })
+        state.openProject(mainRepo.path).join()
+
+        state.addNote()
+        val doomed = state.selectedNote!!
+        state.addNote()
+        val survivor = state.selectedNote!!
+        state.updateNote(survivor, "keep me")
+        state.deleteNote(doomed)
+
+        state.addNote()
+        state.updateNote(state.selectedNote!!, "fresh")
+
+        assertEquals(2, state.notes.map { it.id }.toSet().size)
+        assertEquals("keep me", state.notes.single { it.id == survivor }.body)
+    }
+
+    @Test
+    fun `deleting a note selects another one rather than nothing`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+
+        state.addNote()
+        state.updateNote(state.selectedNote!!, "first")
+        val first = state.selectedNote!!
+        state.addNote()
+        state.updateNote(state.selectedNote!!, "second")
+
+        state.deleteNote(state.selectedNote!!)
+
+        assertEquals(first, state.selectedNote)
+        assertEquals(listOf("first"), state.notes.map { it.body })
+
+        state.deleteNote(first)
+        assertNull(state.selectedNote)
+        assertTrue(state.notes.isEmpty())
+    }
+
+    /**
+     * The half that makes writing a note worth doing: it reaches a running agent as a prompt.
+     *
+     * [AppState] knows nothing about terminals, so what is asserted here is the whole of its side
+     * of the contract — the session it was asked for, and the note's text.
+     */
+    @Test
+    fun `sending a note hands its body to the pane that asked for it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val sent = mutableListOf<Pair<String, String>>()
+        val state = newState(onSendPrompt = { id, text -> sent += id to text })
+        state.openProject(mainRepo.path).join()
+
+        state.addNote()
+        state.updateNote(state.selectedNote!!, "  Add a --dry-run flag.\nExplain it in the README.  ")
+
+        state.requestNote("pane-1")
+        assertEquals("pane-1", state.noteRequest)
+
+        state.sendNote("pane-1", state.notes.single())
+
+        assertEquals(listOf("pane-1" to "Add a --dry-run flag.\nExplain it in the README."), sent)
+        assertNull(state.noteRequest)
+    }
+
+    @Test
+    fun `an empty note is not sent`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val sent = mutableListOf<Pair<String, String>>()
+        val state = newState(onSendPrompt = { id, text -> sent += id to text })
+        state.openProject(mainRepo.path).join()
+        state.addNote()
+
+        state.sendNote("pane-1", state.notes.single())
+
+        assertTrue(sent.isEmpty())
     }
 }

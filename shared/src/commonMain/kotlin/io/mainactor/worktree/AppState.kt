@@ -9,6 +9,7 @@ import io.mainactor.worktree.git.GitLogEntry
 import io.mainactor.worktree.git.GitParsers
 import io.mainactor.worktree.git.WorktreeActivity
 import io.mainactor.worktree.model.Branch
+import io.mainactor.worktree.model.Note
 import io.mainactor.worktree.model.ChangedFile
 import io.mainactor.worktree.model.CommitInfo
 import io.mainactor.worktree.model.ConflictSegment
@@ -60,7 +61,7 @@ enum class DiffMode {
     AGAINST_BASE,
 }
 
-enum class RightTab { CHANGES, CONFLICTS, LOG, SEARCH, CONSOLE }
+enum class RightTab { CHANGES, CONFLICTS, LOG, SEARCH, NOTES, CONSOLE }
 
 /** The two things the window can be: a repository, or a wall of agents working in it. */
 enum class AppMode { PROJECT, AGENTS }
@@ -116,6 +117,14 @@ class AppState(
     private val shell: ShellRunner,
     /** Colours the diff. Injected like every other platform thing; absent in a render test. */
     val highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
+    private val notesStore: NotesStore = NotesStore(fs),
+    /**
+     * Hands a prompt to a running pane.
+     *
+     * A function rather than a dependency on the terminal: `:shared` does not know what a terminal
+     * is, and this is the one thing a note needs from one.
+     */
+    private val onSendPrompt: (sessionId: String, text: String) -> Unit = { _, _ -> },
     val system: SystemIntegration,
     private val scope: CoroutineScope,
     /** Lets the platform layer tear down the shell process behind a terminal tab we drop. */
@@ -368,6 +377,7 @@ class AppState(
         store.setLastOpened(root)
         projectAgents = agentStore.forProjectOrDefault(root)
         project = projects.first { it.path == root }
+        loadNotes(root)
         selectedWorktree = null
         baseRef = null
         diffMode = DiffMode.WORKING_TREE
@@ -1452,6 +1462,92 @@ class AppState(
      * The dialog is App's own state, and the shortcut that triggers it arrives from a global key
      * hook outside the composition, so it travels as a request the window observes and clears.
      */
+    // ---------------------------------------------------------------- notes
+
+    /**
+     * The ideas written down for the open project, newest first.
+     *
+     * Newest first because a note is written when the thought arrives and reached for while it is
+     * still warm; a list in the order they were created buries the one you just wrote.
+     */
+    var notes by mutableStateOf<List<Note>>(emptyList())
+        private set
+
+    var selectedNote by mutableStateOf<String?>(null)
+        private set
+
+    /** A pane waiting to be given a prompt, which the window turns into a picker. */
+    var noteRequest by mutableStateOf<String?>(null)
+        private set
+
+    fun selectNote(id: String?) {
+        selectedNote = id
+    }
+
+    /**
+     * Starts a new note and puts the caret in it.
+     *
+     * The id counts up rather than being derived from the list — `notes.size` reuses the id of a
+     * note deleted a moment ago, and two notes with one id are edited as one.
+     */
+    private var noteSeq = 0
+
+    fun addNote() {
+        val note = Note(id = "note-${fs.now()}-${noteSeq++}", body = "", updatedAt = fs.now())
+        notes = listOf(note) + notes
+        selectedNote = note.id
+        persistNotes()
+    }
+
+    /**
+     * Saves as you type.
+     *
+     * There is no save button and no dirty state, because a scratchpad with either is a scratchpad
+     * people stop using. The file is a few kilobytes and rewriting it costs nothing worth counting.
+     */
+    fun updateNote(id: String, body: String) {
+        notes = notes.map { if (it.id == id) it.copy(body = body, updatedAt = fs.now()) else it }
+        persistNotes()
+    }
+
+    fun deleteNote(id: String) {
+        notes = notes.filterNot { it.id == id }
+        if (selectedNote == id) selectedNote = notes.firstOrNull()?.id
+        persistNotes()
+    }
+
+    /** Asks which note to send to [sessionId]; the window shows the picker. */
+    fun requestNote(sessionId: String) {
+        noteRequest = sessionId
+    }
+
+    fun clearNoteRequest() {
+        noteRequest = null
+    }
+
+    /**
+     * Hands a note to a running agent as if it had been pasted and submitted.
+     *
+     * Pasted rather than typed: a prompt is several lines, and a terminal that receives them as
+     * ordinary input submits the first one and runs the rest as separate commands. Whether the
+     * agent asked for bracketed paste is the backend's business, because only it knows.
+     */
+    fun sendNote(sessionId: String, note: Note) {
+        if (note.isEmpty) return
+        onSendPrompt(sessionId, note.body.trim())
+        noteRequest = null
+    }
+
+    private fun persistNotes() {
+        val path = project?.path ?: return
+        notesStore.save(notesStore.load() + (path to notes))
+    }
+
+    private fun loadNotes(path: String?) {
+        notes = path?.let { notesStore.load()[it] }.orEmpty().sortedByDescending { it.updatedAt }
+        selectedNote = notes.firstOrNull()?.id
+    }
+
     var agentRequest by mutableStateOf<AgentRequest?>(null)
         private set
 

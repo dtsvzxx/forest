@@ -774,6 +774,37 @@ several can be in flight in different worktrees at once, which is why `backgroun
 the status bar shows the first with a count. The refresh afterwards goes through `refresh()` so it
 takes the lock like every other one.
 
+## Notes
+
+The Notes tab is a per-project scratchpad for ideas **written as prompts**, and its other half is on
+the agent wall: a pane's context menu offers *Send note…*, the picker lists the project's notes, and
+the chosen one is handed to the running agent as if it had been pasted and submitted. Writing an
+idea down is only worth doing because using it later costs one right-click.
+
+- **A note has no title.** Its first non-blank line is the name and the second is the preview
+  (`model/Note.kt`) — naming a thought is a second job, and nobody does it when the thought is the
+  point. An empty note reads "Empty note" rather than showing a blank row, and `sendNote` refuses
+  to send one.
+- **There is no save button.** `updateNote` writes the file on every keystroke; a scratchpad with a
+  dirty state is a scratchpad people stop using, and the file is a few kilobytes.
+- **Ids count up (`noteSeq`), they are not derived from the list.** An id built from `notes.size`
+  hands a new note the id of one still in the list as soon as anything was deleted from the middle,
+  and the editor writes through the id — two notes with one id are edited as one. Pinned by `a note
+  added after a deletion does not collide with a surviving one`, which stops the clock to reach the
+  case at all.
+- Storage is `~/.worktree/notes.json`, keyed by project path, JSON for the same reason
+  `agents.json` is: a prompt is many lines of arbitrary text, which no line-per-entry format holds.
+  It sits beside the machine's other preferences rather than in the repository — a half-formed
+  thought is not something to put in front of everyone who clones it.
+
+**Delivery is the backend's business, not `AppState`'s.** `AppState` calls `onSendPrompt(sessionId,
+text)`, which `main.kt` binds to `TerminalBackend.sendPrompt`; only the engine knows whether the
+program asked for bracketed paste, and without it a multi-line prompt submits its first line and
+runs the rest as separate commands. Both engines implement it — the native one through
+`KeyEncoder.paste`, JediTerm by wrapping the text itself, which is why `ChromelessTerminalWidget`
+subclasses `TerminalPanel` purely to record whether mode 2004 is on. `a prompt reaches the engine
+that owns the pane` covers the router.
+
 ## Usage statistics
 
 Each agent pane's header shows what the agent CLIs have spent in that pane's worktree — tokens and
@@ -846,7 +877,9 @@ filtered list), `app-render-conflicts` (a stopped merge, reached by feeding a co
 history shaped like a real shared repository — long refs, merge subjects and eight-character
 hashes, the size at which the hash column used to wrap onto a second, clipped line),
 `app-render-search` (a file's history), `app-render-dialog`, `app-render-tooltip` (a synthesised hover — that one sleeps past the real hover
-delay, since `TooltipArea` counts wall-clock time rather than frames) and `app-render-splitter`.
+delay, since `TooltipArea` counts wall-clock time rather than frames), `app-render-splitter`,
+`app-render-notes` (the Notes tab, two notes and the editor) and `app-render-send-note` (the
+picker that hands one to an agent).
 Two tests drive real pointer press/move/release sequences over the dividers and assert the pane
 boundary moved; they are what caught the frozen splitters. A third renders the same state into two
 differently sized windows and asserts the dividers land in identical places — the guard against

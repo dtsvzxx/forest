@@ -214,6 +214,14 @@ private fun AgentPane(
                 ContextMenuItem("New agent here") {
                     state.openAgent(state.worktrees.firstOrNull { it.path == session.workDir })
                 },
+                // The whole reason the notes pane is worth writing in: an idea is one right-click
+                // from the agent that will act on it.
+                ContextMenuItem(
+                    if (state.notes.isEmpty()) "Send note… (none yet)" else "Send note…",
+                ) {
+                    state.focusAgent(session.id)
+                    state.requestNote(session.id)
+                },
                 ContextMenuItem("Copy path") { state.system.copyToClipboard(session.workDir) },
                 ContextMenuItem(state.system.revealLabel) { state.system.reveal(session.workDir) },
                 ContextMenuItem("Close agent") { state.closeAgent(session.id) },

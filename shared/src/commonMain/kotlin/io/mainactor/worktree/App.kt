@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import io.mainactor.worktree.model.Note
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.model.Worktree
 import io.mainactor.worktree.ui.MainToolbar
@@ -44,12 +45,14 @@ import io.mainactor.worktree.ui.dialogs.RenameWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.NewWorktreeDialog
 import io.mainactor.worktree.ui.dialogs.RebaseDialog
 import io.mainactor.worktree.ui.dialogs.RemoveWorktreeDialog
+import io.mainactor.worktree.ui.dialogs.SendNoteDialog
 import io.mainactor.worktree.ui.dialogs.SwitchBranchDialog
 import io.mainactor.worktree.ui.panes.AgentsPane
 import io.mainactor.worktree.ui.panes.ChangesPane
 import io.mainactor.worktree.ui.panes.ConflictsPane
 import io.mainactor.worktree.ui.panes.ConsolePane
 import io.mainactor.worktree.ui.panes.LogPane
+import io.mainactor.worktree.ui.panes.NotesPane
 import io.mainactor.worktree.ui.panes.SearchPane
 import io.mainactor.worktree.ui.panes.ProjectsPane
 import io.mainactor.worktree.ui.panes.WorktreesPane
@@ -67,6 +70,7 @@ private sealed interface Dialog {
     data class SwitchBranch(val worktree: Worktree) : Dialog
     data class RenameWorktree(val worktree: Worktree) : Dialog
     data class NewAgent(val axis: SplitAxis?) : Dialog
+    data class SendNote(val sessionId: String) : Dialog
     data object AgentSettings : Dialog
 }
 
@@ -101,6 +105,10 @@ fun App(
                 dialog = Dialog.NewAgent(request.axis)
                 state.clearAgentRequest()
             }
+        }
+
+        LaunchedEffect(state.noteRequest) {
+            state.noteRequest?.let { sessionId -> dialog = Dialog.SendNote(sessionId) }
         }
 
         Column(Modifier.fillMaxSize().background(colors.editor)) {
@@ -245,6 +253,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
             )
             IdeTab("Log", state.rightTab == RightTab.LOG, { state.rightTab = RightTab.LOG })
             IdeTab("Search", state.rightTab == RightTab.SEARCH, { state.rightTab = RightTab.SEARCH })
+            IdeTab("Notes", state.rightTab == RightTab.NOTES, { state.rightTab = RightTab.NOTES })
             IdeTab("Console", state.rightTab == RightTab.CONSOLE, { state.rightTab = RightTab.CONSOLE })
         }
         HorizontalDivider()
@@ -259,6 +268,7 @@ private fun RightPane(state: AppState, onCommit: () -> Unit, modifier: Modifier 
                     RightTab.CONFLICTS -> ConflictsPane(state)
                     RightTab.LOG -> LogPane(state)
                     RightTab.SEARCH -> SearchPane(state)
+                    RightTab.NOTES -> NotesPane(state)
                     RightTab.CONSOLE -> ConsolePane(state)
                 }
             }
@@ -383,6 +393,15 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
             onConfirm = { url, parent, folder ->
                 onDismiss()
                 state.cloneProject(url, parent, folder)
+            },
+        )
+
+        is Dialog.SendNote -> SendNoteDialog(
+            notes = state.notes,
+            onDismiss = { onDismiss(); state.clearNoteRequest() },
+            onSend = { note ->
+                onDismiss()
+                state.sendNote(dialog.sessionId, note)
             },
         )
 

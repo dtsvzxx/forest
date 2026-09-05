@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import io.mainactor.worktree.TerminalSession
 import io.mainactor.worktree.platform.Os
+import io.mainactor.worktree.term.KeyEncoder
 import io.mainactor.worktree.term.TerminalClipboard
 import io.mainactor.worktree.term.TerminalSessions
 import io.mainactor.worktree.term.ui.TerminalView
@@ -31,6 +32,12 @@ class NativeTerminalBackend(
 ) : TerminalBackend {
 
     override var onFocusGained: (sessionId: String) -> Unit = {}
+
+    override fun sendPrompt(id: String, text: String) {
+        val pane = sessions.get(id) ?: return
+        pane.send(pane.withModel { KeyEncoder.paste(text, it.modes) })
+        pane.send("\r")
+    }
 
     override fun close(id: String) = sessions.close(id)
 

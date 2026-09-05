@@ -12,7 +12,12 @@ import kotlin.test.assertTrue
 private class NoopBackend(val name: String) : TerminalBackend {
     override var onFocusGained: (sessionId: String) -> Unit = {}
     val closed = mutableListOf<String>()
+    val prompts = mutableListOf<Pair<String, String>>()
     var closedAll = false
+
+    override fun sendPrompt(id: String, text: String) {
+        prompts += id to text
+    }
 
     override fun close(id: String) {
         closed += id
@@ -70,6 +75,20 @@ class TerminalBackendsTest {
         // Closed and reopened, it follows the setting like any new pane.
         backends.close("first")
         assertSame(native, backends.backendFor("first"))
+    }
+
+    /** A prompt goes to the engine the pane is running on, not to whichever one is current. */
+    @Test
+    fun `a prompt reaches the engine that owns the pane`() {
+        backends.backendFor("swing-pane")
+        engine = TerminalEngine.NATIVE
+        backends.backendFor("compose-pane")
+
+        backends.sendPrompt("swing-pane", "an idea")
+        backends.sendPrompt("compose-pane", "another")
+
+        assertEquals(listOf("swing-pane" to "an idea"), jediterm.prompts)
+        assertEquals(listOf("compose-pane" to "another"), native.prompts)
     }
 
     @Test

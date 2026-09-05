@@ -6,7 +6,10 @@ import com.jediterm.terminal.ProcessTtyConnector
 import com.jediterm.terminal.TerminalColor
 import com.jediterm.terminal.TextStyle
 import com.jediterm.terminal.emulator.ColorPalette
+import com.jediterm.terminal.model.StyleState
+import com.jediterm.terminal.model.TerminalTextBuffer
 import com.jediterm.terminal.ui.JediTermWidget
+import com.jediterm.terminal.ui.TerminalPanel
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.ui.settings.SettingsProvider
 import com.pty4j.PtyProcess
@@ -93,6 +96,22 @@ class TerminalSessionManager : TerminalBackend {
         return handle
     }
 
+    /**
+     * Types a prompt into a pane and submits it.
+     *
+     * The bracketed markers are added by hand because JediTerm only offers pasting *from the
+     * clipboard* — and putting somebody's note on their clipboard to deliver it would be a strange
+     * thing for this to do. Whether to bracket comes from [ChromelessTerminalWidget], which
+     * remembers what the program asked for.
+     */
+    override fun sendPrompt(id: String, text: String) {
+        val handle = sessions[id] ?: return
+        val widget = handle.widget as? ChromelessTerminalWidget ?: return
+        val body = text.replace("\r\n", "\r").replace('\n', '\r')
+        val payload = if (widget.bracketedPaste) "\u001B[200~" + body + "\u001B[201~" else body
+        runCatching { handle.widget.ttyConnector.write(payload + "\r") }
+    }
+
     override fun close(id: String) {
         sessions.remove(id)?.dispose()
     }
@@ -142,6 +161,28 @@ class TerminalSessionManager : TerminalBackend {
  * gives the text the full width of the pane.
  */
 private class ChromelessTerminalWidget(settings: SettingsProvider) : JediTermWidget(settings) {
+
+    /**
+     * What the program asked for, recorded on its way past.
+     *
+     * `TerminalPanel` is told when bracketed paste turns on and offers no way to ask; a subclass
+     * that notes it down is the difference between a multi-line prompt arriving as one paste and
+     * arriving as a first line plus a handful of accidental commands.
+     */
+    @Volatile
+    var bracketedPaste: Boolean = false
+        private set
+
+    override fun createTerminalPanel(
+        settingsProvider: SettingsProvider,
+        styleState: StyleState,
+        textBuffer: TerminalTextBuffer,
+    ): TerminalPanel = object : TerminalPanel(settingsProvider, textBuffer, styleState) {
+        override fun setBracketedPasteMode(enabled: Boolean) {
+            super.setBracketedPasteMode(enabled)
+            bracketedPaste = enabled
+        }
+    }
 
     override fun createScrollBar(): JScrollBar = super.createScrollBar().apply {
         isVisible = false

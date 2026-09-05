@@ -44,6 +44,10 @@ class TerminalBackends(
             native.onFocusGained = value
         }
 
+    override fun sendPrompt(id: String, text: String) {
+        owner[id]?.sendPrompt(id, text)
+    }
+
     override fun close(id: String) {
         owner.remove(id)?.close(id) ?: run {
             // A pane the router never saw cannot be routed, so ask both; closing an id an engine

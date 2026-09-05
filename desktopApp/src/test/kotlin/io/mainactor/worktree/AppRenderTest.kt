@@ -137,6 +137,69 @@ class AppRenderTest {
     }
 
     @Test
+    fun `notes are written in one pane and picked from another`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.rightTab = RightTab.NOTES
+            state.addNote()
+            state.updateNote(state.selectedNote!!, "Ship the release notes\n\nRead the log since the last tag.")
+            state.addNote()
+            state.updateNote(
+                state.selectedNote!!,
+                "Rewrite the pty layer on FFM\n\nNo native library should ship in a jar.",
+            )
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-notes.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        // The list is newest first, and a note is named by its own first line.
+        assertEquals(
+            listOf("Rewrite the pty layer on FFM", "Ship the release notes"),
+            state.notes.map { it.title },
+        )
+    }
+
+    @Test
+    fun `renders the picker that sends a note to an agent`() {
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.addNote()
+            state.updateNote(state.selectedNote!!, "Rewrite the pty layer on FFM\n\nNo native library in a jar.")
+            state.addNote()
+            state.updateNote(state.selectedNote!!, "Ship the release notes")
+            state.switchTo(AppMode.AGENTS)
+            scene.render()
+            state.requestNote("pane-1")
+            // One pass runs the effect that turns the request into a dialog, the next paints it.
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-send-note.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        assertEquals("pane-1", state.noteRequest, "the picker should still be open")
+    }
+
+    @Test
     fun `renders a failed command's output`() {
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             WorktreeTheme {

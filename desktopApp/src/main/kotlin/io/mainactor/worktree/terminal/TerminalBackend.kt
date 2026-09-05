@@ -31,6 +31,16 @@ interface TerminalBackend {
      */
     var onFocusGained: (sessionId: String) -> Unit
 
+    /**
+     * Hands [text] to a running pane as if it had been pasted, and submits it.
+     *
+     * Pasted rather than typed, and that is the whole of the contract: a prompt is several lines,
+     * and a program receiving them as ordinary input submits the first and runs the rest as
+     * separate commands. Bracketed paste is what stops that, and only the engine knows whether the
+     * program asked for it — which is why this is here rather than at the call site.
+     */
+    fun sendPrompt(id: String, text: String)
+
     /** Ends the session's process. Composition being discarded must not do this — a tab may just be inactive. */
     fun close(id: String)
 
