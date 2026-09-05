@@ -361,17 +361,26 @@ private fun BranchList(
     }
 }
 
+/**
+ * @param pushCommand what pushing would run, shown beside the checkbox the way a `ToolButton`'s
+ *   `detail` does — a branch with no upstream is about to get one, and that is worth seeing before
+ *   the commit rather than after it.
+ */
 @Composable
 fun CommitDialog(
     stagedCount: Int,
     unstagedCount: Int,
+    pushCommand: String,
     onDismiss: () -> Unit,
-    onCommit: (message: String, amend: Boolean, stageAll: Boolean) -> Unit,
+    onCommit: (message: String, amend: Boolean, stageAll: Boolean, push: Boolean) -> Unit,
 ) {
     val colors = LocalWorktreeColors.current
     var message by remember { mutableStateOf("") }
     var amend by remember { mutableStateOf(false) }
     var stageAll by remember { mutableStateOf(stagedCount == 0 && unstagedCount > 0) }
+    // Off every time the dialog opens: pushing leaves the machine, and a box that remembers itself
+    // would publish a commit at some point because it was ticked for a different one.
+    var push by remember { mutableStateOf(false) }
     val canCommit = message.isNotBlank() && (stagedCount > 0 || stageAll || amend)
 
     Modal(
@@ -381,8 +390,13 @@ fun CommitDialog(
         footer = {
             IdeButton("Cancel", onDismiss)
             IdeButton(
-                text = if (amend) "Amend" else "Commit",
-                onClick = { onCommit(message, amend, stageAll) },
+                text = when {
+                    amend && push -> "Amend and push"
+                    amend -> "Amend"
+                    push -> "Commit and push"
+                    else -> "Commit"
+                },
+                onClick = { onCommit(message, amend, stageAll, push) },
                 enabled = canCommit,
                 primary = canCommit,
             )
@@ -404,6 +418,16 @@ fun CommitDialog(
             }
             CheckRow("Stage all changes first (git commit --all)", stageAll) { stageAll = !stageAll }
             CheckRow("Amend the previous commit", amend) { amend = !amend }
+            CheckRow("Push afterwards ($pushCommand)", push) { push = !push }
+            if (amend && push) {
+                Text(
+                    // Amending rewrites the commit; the remote refuses that unless it never had it.
+                    text = "A commit the remote already has will reject an amended one — push that " +
+                        "by hand, with a force.",
+                    color = colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }

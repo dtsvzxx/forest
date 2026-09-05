@@ -348,10 +348,11 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
         Dialog.Commit -> CommitDialog(
             stagedCount = state.status.staged.size,
             unstagedCount = state.status.unstaged.size,
+            pushCommand = state.pushCommand,
             onDismiss = onDismiss,
-            onCommit = { message, amend, stageAll ->
+            onCommit = { message, amend, stageAll, push ->
                 onDismiss()
-                state.commit(message, amend, stageAll)
+                state.commit(message, amend, stageAll, push)
             },
         )
 

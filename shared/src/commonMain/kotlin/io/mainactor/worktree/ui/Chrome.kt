@@ -119,7 +119,7 @@ fun MainToolbar(
             } else {
                 "Push — publishes this branch, which has no upstream yet"
             },
-            detail = if (status.hasUpstream) "git push" else "git push -u origin ${status.branch.orEmpty()}",
+            detail = state.pushCommand,
             onClick = { state.push() },
             enabled = gitActionsEnabled,
         )

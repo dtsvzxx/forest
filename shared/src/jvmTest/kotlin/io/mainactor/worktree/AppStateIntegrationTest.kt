@@ -761,6 +761,51 @@ class AppStateIntegrationTest {
     }
 
     @Test
+    fun `committing with push ticked sends the commit to the remote`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+
+        // Bare, because that is what a remote is: pushing to a branch someone has checked out is
+        // refused, and the test would be measuring that instead.
+        val remote = File(root, "remote.git")
+        git.run(root.path, "init", "--bare", "--quiet", remote.path)
+        git.run(mainRepo.path, "remote", "add", "origin", remote.path)
+        state.openProject(mainRepo.path).join()
+
+        // An edit to a tracked file: `git commit --all` stages those and leaves new files alone.
+        File(mainRepo, "file.txt").writeText("changed\n")
+        state.commit("a commit that travels", amend = false, stageAll = true, push = true).join()
+
+        val head = git.run(mainRepo.path, "rev-parse", "HEAD").stdout.trim()
+        assertEquals(head, git.run(remote.path, "rev-parse", "main").stdout.trim())
+        // The branch had no upstream, so pushing had to give it one.
+        assertEquals("origin/main", state.status.upstream)
+    }
+
+    /** A push sends the branch, not the commit — so a commit that never happened must not push. */
+    @Test
+    fun `a commit that fails is not pushed`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+
+        val remote = File(root, "remote-untouched.git")
+        git.run(root.path, "init", "--bare", "--quiet", remote.path)
+        git.run(mainRepo.path, "remote", "add", "origin", remote.path)
+        state.openProject(mainRepo.path).join()
+
+        // Nothing staged and nothing to stage: `git commit` fails, and the branch stays home.
+        state.commit("nothing to see", amend = false, stageAll = false, push = true).join()
+
+        assertTrue(state.notice?.isError == true, "a failed commit reported nothing")
+        assertTrue(
+            !git.run(remote.path, "rev-parse", "main").ok,
+            "the remote was given a branch by a commit that never happened",
+        )
+    }
+
+    @Test
     fun `picking a remote branch creates a local branch that tracks it`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val state = newState()

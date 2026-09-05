@@ -978,9 +978,21 @@ class AppState(
         result
     }
 
-    fun commit(message: String, amend: Boolean, stageAll: Boolean) = mutate("Committing") { dir ->
-        git.commit(dir, message, amend = amend, stageAll = stageAll)
-    }
+    /**
+     * Commits, and — when [push] is set — sends it on in the same action.
+     *
+     * The push is skipped when the commit failed: there is nothing new to publish then, and
+     * pushing regardless would send whatever the branch already held under the impression that it
+     * is the commit just written. One action rather than two also means one lock and one refresh,
+     * and a status bar that names the step it is on.
+     */
+    fun commit(message: String, amend: Boolean, stageAll: Boolean, push: Boolean = false) =
+        mutate("Committing") { dir ->
+            val committed = git.commit(dir, message, amend = amend, stageAll = stageAll)
+            if (!push || !committed.ok) return@mutate committed
+            busy = "Pushing"
+            pushFrom(dir)
+        }
 
     // ---------------------------------------------------------------- remote ops
 
@@ -988,11 +1000,23 @@ class AppState(
 
     fun pull(rebase: Boolean) = mutate("Pulling") { dir -> git.pull(dir, rebase) }
 
-    fun push(force: Boolean = false) = mutate("Pushing") { dir ->
+    fun push(force: Boolean = false) = mutate("Pushing") { dir -> pushFrom(dir, force) }
+
+    private suspend fun pushFrom(dir: String, force: Boolean = false): CommandResult {
         val branch = status.branch
         val setUpstream = !status.hasUpstream && branch != null
-        git.push(dir, setUpstream = setUpstream, force = force, branch = branch)
+        return git.push(dir, setUpstream = setUpstream, force = force, branch = branch)
     }
+
+    /**
+     * The exact command [push] will run.
+     *
+     * A branch with no upstream needs one, and the toolbar button and the commit dialog both
+     * promise to show what they are about to run — from here, so the two cannot disagree with each
+     * other or with [pushFrom].
+     */
+    val pushCommand: String
+        get() = if (status.hasUpstream) "git push" else "git push -u origin ${status.branch.orEmpty()}"
 
     // ---------------------------------------------------------------- integrate
 

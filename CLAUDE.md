@@ -138,6 +138,16 @@ returns the `Job`, which is what makes `AppStateIntegrationTest` able to `.join(
 paths; a path from a dialog or from `File(...)` may not be one (on macOS `/var/…` vs `/private/var/…`),
 and a naive `==` silently selects the wrong worktree.
 
+**Commit carries an optional push**, and the two are one action rather than two calls from the
+dialog: one lock, one refresh, and a status bar that names the step it is on. The push is skipped
+when the commit failed — there is nothing new to send then, and pushing regardless would publish
+whatever the branch already held as if it were the commit just written (`a commit that fails is not
+pushed`). The checkbox starts clear every time the dialog opens: pushing leaves the machine, and a
+box that remembers itself eventually publishes a commit because it was ticked for a different one.
+What the push will run is `AppState.pushCommand` — the toolbar button's `detail` and the checkbox's
+own label read it from there, so neither can drift from `pushFrom`, which is the only place that
+decides a branch with no upstream needs `-u`.
+
 ### UI
 
 `WorktreeTheme` provides `WorktreeColors` through `LocalWorktreeColors` — Material3's scheme covers
