@@ -8,3 +8,11 @@ gradlew text eol=lf
 *.ico binary
 *.icns binary
 *.jar binary
+
+# The recorded terminal streams are bytes, not text.
+#
+# They carry the carriage returns a real program emitted, and the goldens beside them were made
+# from those exact bytes. Normalising the line endings would rewrite the recordings on checkout
+# and every golden test would fail on the next machine — a confusing way to find out that a
+# fixture is not a text file.
+terminal/src/jvmTest/resources/term/*.raw binary

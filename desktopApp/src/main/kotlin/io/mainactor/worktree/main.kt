@@ -26,13 +26,18 @@ import io.mainactor.worktree.platform.ProcessCommandRunner
 import io.mainactor.worktree.platform.SwingDirectoryChooser
 import io.mainactor.worktree.model.SplitAxis
 import io.mainactor.worktree.terminal.AgentKeyBindings
-import io.mainactor.worktree.terminal.EmbeddedTerminal
 import io.mainactor.worktree.terminal.defaultAgentBindings
 import io.mainactor.worktree.ui.components.ForestIconPainter
 import io.mainactor.worktree.ui.AgentShortcuts
 import io.mainactor.worktree.ui.WindowChrome
 import io.mainactor.worktree.window.WindowDrag
 import io.mainactor.worktree.window.hideTitleBar
+import io.mainactor.worktree.terminal.NativeTerminalBackend
+import io.mainactor.worktree.terminal.TerminalEngine
+import io.mainactor.worktree.ui.TerminalEngines
+import io.mainactor.worktree.terminal.TerminalBackend
+import io.mainactor.worktree.terminal.TerminalBackends
+import io.mainactor.worktree.terminal.TerminalEngineSetting
 import io.mainactor.worktree.terminal.TerminalSessionManager
 
 fun main() {
@@ -60,7 +65,35 @@ fun main() {
 
     application {
         val windowState = rememberWindowState(size = DpSize(1440.dp, 900.dp))
-        val terminals = remember { TerminalSessionManager() }
+        // Both engines, side by side, with the setting deciding what the next pane opens on. A
+        // running pane cannot change engine — its process is attached to one — so this routes by
+        // session rather than switching globally.
+        val terminals: TerminalBackend = remember {
+            val setting = TerminalEngineSetting(JvmFileSystemAccess())
+            // The menu lives in the projects pane and knows nothing about engines; it is filled in
+            // from here, the way the agent shortcuts and the window chrome are.
+            TerminalEngines.options = listOf(
+                TerminalEngines.Option(
+                    id = TerminalEngine.JEDITERM.name,
+                    label = "JediTerm terminal",
+                    detail = "The IntelliJ emulator, hosted from Swing",
+                ),
+                TerminalEngines.Option(
+                    id = TerminalEngine.NATIVE.name,
+                    label = "Forest terminal",
+                    detail = "Ours, drawn by Compose",
+                ),
+            )
+            TerminalEngines.selected = setting.read().name
+            TerminalEngines.onSelect = { id ->
+                TerminalEngine.of(id)?.let(setting::write)
+            }
+            TerminalBackends(
+                jediterm = TerminalSessionManager(),
+                native = NativeTerminalBackend(),
+                engine = { TerminalEngine.of(TerminalEngines.selected) ?: setting.read() },
+            )
+        }
 
         val state = rememberAppState(terminals)
 
@@ -140,12 +173,7 @@ fun main() {
             App(
                 state = state,
                 terminal = { session, focused, modifier ->
-                    EmbeddedTerminal(
-                        session = session,
-                        manager = terminals,
-                        focused = focused,
-                        modifier = modifier,
-                    )
+                    terminals.Pane(session = session, focused = focused, modifier = modifier)
                 },
             )
         }
@@ -159,7 +187,7 @@ fun main() {
  * breaks that cycle without making either of them nullable at the point of use.
  */
 @androidx.compose.runtime.Composable
-private fun rememberAppState(terminals: TerminalSessionManager): AppState {
+private fun rememberAppState(terminals: TerminalBackend): AppState {
     val scope = rememberCoroutineScope()
     return remember {
         val fs = JvmFileSystemAccess()
@@ -190,7 +218,7 @@ private const val DOCK_ICON_SIDE = 512f
 /**
  * How far the macOS close/minimise/zoom buttons reach from the window's left edge.
  *
- * They are laid out by the window server, not by us — 12pt wide, 20pt apart, from 20pt — and this
- * leaves the same margin after the last of them that they start with.
+ * They are laid out by the window server, not by us — 12pt wide, 20pt apart, starting at 20pt —
+ * and this leaves the same margin after the last of them that they start with.
  */
 private val MAC_WINDOW_CONTROLS_WIDTH = 78.dp

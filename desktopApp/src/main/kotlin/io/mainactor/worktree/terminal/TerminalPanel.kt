@@ -15,9 +15,12 @@ import io.mainactor.worktree.TerminalSession
  * The widget is fetched from the manager rather than created here, so re-entering a tab reattaches
  * the *running* shell instead of starting a fresh one. Closing the tab is what ends the process,
  * and that is driven from [io.mainactor.worktree.AppState], not from composition being discarded.
+ *
+ * Internal: the window reaches a pane through [TerminalBackend.Pane], never through a particular
+ * terminal's own composable.
  */
 @Composable
-fun EmbeddedTerminal(
+internal fun EmbeddedTerminal(
     session: TerminalSession,
     manager: TerminalSessionManager,
     focused: Boolean,

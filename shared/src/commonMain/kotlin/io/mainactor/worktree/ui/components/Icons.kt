@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -54,6 +54,13 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
+        // Sliders rather than a cogwheel: at 14dp a cogwheel's teeth are one pixel of mush.
+        IconKind.SETTINGS -> {
+            listOf(0.28f to 0.62f, 0.5f to 0.36f, 0.72f to 0.7f).forEach { (y, knob) ->
+                line(0.16f, y, 0.84f, y)
+                drawCircle(tint, radius = s * 0.09f, center = p(knob, y), style = stroke)
+            }
+        }
         IconKind.CLOSE -> {
             line(0.24f, 0.24f, 0.76f, 0.76f)
             line(0.76f, 0.24f, 0.24f, 0.76f)

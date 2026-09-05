@@ -12,6 +12,9 @@ import com.jediterm.terminal.ui.settings.SettingsProvider
 import com.pty4j.PtyProcess
 import com.pty4j.PtyProcessBuilder
 import com.pty4j.WinSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import io.mainactor.worktree.TerminalSession
 import io.mainactor.worktree.platform.Os
 import java.awt.Dimension
 import java.awt.Font
@@ -52,12 +55,12 @@ class TerminalSessionHandle internal constructor(
 }
 
 /**
- * Owns the live terminal processes.
+ * Owns the live terminal processes: the JediTerm implementation of [TerminalBackend].
  *
  * Sessions outlive composition on purpose: switching to another tab, or hiding the tool window,
  * must not kill a running build. The manager hands the same widget back when the tab returns.
  */
-class TerminalSessionManager {
+class TerminalSessionManager : TerminalBackend {
     private val sessions = mutableMapOf<String, TerminalSessionHandle>()
 
     /**
@@ -67,7 +70,12 @@ class TerminalSessionManager {
      * Compose click handler around it — AWT consumes it. Without this the app's idea of "the
      * focused pane" would only ever change by clicking a header, while typing went somewhere else.
      */
-    var onFocusGained: (sessionId: String) -> Unit = {}
+    override var onFocusGained: (sessionId: String) -> Unit = {}
+
+    @Composable
+    override fun Pane(session: TerminalSession, focused: Boolean, modifier: Modifier) {
+        EmbeddedTerminal(session = session, manager = this, focused = focused, modifier = modifier)
+    }
 
     fun getOrCreate(
         id: String,
@@ -85,11 +93,11 @@ class TerminalSessionManager {
         return handle
     }
 
-    fun close(id: String) {
+    override fun close(id: String) {
         sessions.remove(id)?.dispose()
     }
 
-    fun closeAll() {
+    override fun closeAll() {
         sessions.values.forEach { it.dispose() }
         sessions.clear()
     }
@@ -100,11 +108,7 @@ class TerminalSessionManager {
         title: String,
         command: String?,
     ): TerminalSessionHandle {
-        val env = HashMap(System.getenv())
-        // Tell the shell it is talking to a capable terminal, and keep pagers from taking over.
-        env["TERM"] = "xterm-256color"
-        env["COLORTERM"] = "truecolor"
-        if (Os.isMac) env["LANG"] = env["LANG"] ?: "en_US.UTF-8"
+        val env = terminalEnvironment()
 
         val process = PtyProcessBuilder()
             .setCommand(Os.shellRunning(command).toTypedArray())

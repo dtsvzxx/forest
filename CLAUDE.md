@@ -16,6 +16,7 @@ feature list.
 ./gradlew :desktopApp:run             # standard run
 ./gradlew build                       # compile + all tests
 ./gradlew :shared:jvmTest             # shared tests (commonTest + jvmTest)
+./gradlew :terminal:jvmTest           # terminal: emulator and pseudo-terminal, seconds
 ./gradlew :desktopApp:test            # off-screen render test
 ./gradlew :shared:jvmTest --tests "io.mainactor.worktree.git.DiffParserTest"          # one class
 ./gradlew :shared:jvmTest --tests "*GitIntegrationTest.lists the main worktree*"      # one test
@@ -24,7 +25,13 @@ feature list.
 
 No lint/format task is configured; `kotlin.code.style=official`. Gradle 9.1 with configuration
 cache **and** build cache on, so build-script changes must stay configuration-cache compatible. JVM
-toolchain pinned to Azul 21 via `gradle/gradle-daemon-jvm.properties`.
+toolchain pinned to **Azul 25** — in `gradle/gradle-daemon-jvm.properties` (generated, regenerate it
+with `./gradlew updateDaemonJvm --jvm-version=N --jvm-vendor=AZUL` rather than by hand) and again as
+an explicit `jvmToolchain(25)` in both modules, because the version that compiles this is a
+behavioural fact: the terminal's pseudo-terminal is moving onto `java.lang.foreign`, which is final
+only from JDK 22. Every JVM the build launches carries `--enable-native-access=ALL-UNNAMED` — the
+packaged `Forest.cfg`, `run`/`hotRun` and the test tasks — since JDK 24 warns on each restricted
+call without it and JDK 26 will refuse.
 
 ## Architecture
 
@@ -34,7 +41,17 @@ Three layers, and the seam between them is what keeps the app testable:
 desktopApp/          Window, JediTerm terminal, wiring (main.kt)
 shared/jvmMain/      ProcessCommandRunner, JvmFileSystemAccess, SwingDirectoryChooser, GitLocator, Os
 shared/commonMain/   models · GitParsers · Git · AppState · the entire Compose UI
+terminal/            a terminal of our own: pseudo-terminal (FFM), emulator, view
 ```
+
+**`:terminal` is a module rather than a package, and the boundary is the point.** Nothing in it can
+reach `AppState` or `Git`, which is what keeps the emulator a pure function from bytes to a screen;
+`./gradlew :terminal:jvmTest` is a seconds-long loop that never touches the UI. The dependency graph
+runs one way and stops: `:terminal` knows nothing of `:shared` (its API takes an id, a directory and
+a command line — not a `TerminalSession`), `:shared` knows nothing of `:terminal` (`App` takes the
+pane as a composable slot), and only `:desktopApp` sees both. It is shaped like `:shared` — Kotlin
+Multiplatform with a single `jvm()` target — so `commonMain` can depend on it without surprises in
+the published metadata.
 
 `commonMain` never touches the JVM directly. Everything platform-specific goes through three
 interfaces in `platform/Platform.kt` — `CommandRunner`, `FileSystemAccess`, `DirectoryChooser` —
@@ -308,6 +325,276 @@ that closing one leaves the rest alone. It needs no display.
 `desktopApp/terminal/` runs a login shell on a pty4j PTY, rendered by JediTerm inside a `SwingPanel`.
 `TerminalSessionManager` owns the processes so they outlive composition — switching tabs must not
 kill a running build; `AppState.onTerminalDisposed` is what actually ends one.
+
+#### The emulator of our own
+
+`terminal/commonMain/.../term/` is a pure function from bytes to a screen: no JVM, no display, no
+clock. That is what lets it be finished before anything draws it, and what makes every test below a
+few lines of "feed this, read the screen back".
+
+- **`Utf8Decoder` holds a partial character across chunks.** A pty hands over whatever was in its
+  buffer, so a four-byte emoji is routinely split between two `read(2)`s; a decoder that restarted
+  per chunk would turn the halves into mojibake that only appears under load. Invalid input follows
+  the WHATWG rule — one U+FFFD per *maximal subpart*, and the byte that ended a bad sequence is
+  reconsidered, so `E0 41` yields U+FFFD and then `A` rather than swallowing the `A`.
+- **`EscapeParser` is Paul Williams' table, not an intuition.** The table's value is not that it
+  parses `CSI 1 m` — anything does — but that it defines where malformed input comes to rest, which
+  is what a terminal spends its undefined moments on: a `cat` of a binary, a program killed halfway
+  through a sequence, a stream resuming mid-escape. `a flood of random bytes leaves the parser on
+  the ground` is the test that says so. Three departures from the table, each deliberate:
+  - a **colon** in CSI parameters separates sub-parameters instead of aborting — the table predates
+    `CSI 38:2::255:0:0 m`, and that is the form Claude Code writes;
+  - **`BEL` ends an OSC string** as well as `ST`, because nothing writes the compliant form alone;
+  - **`ESC` delivers a collected string** rather than discarding it (`ESC \` *is* `ST`), while
+    `CAN` and `SUB` discard — they mean cancel.
+- **A separator closes the parameter before it.** `CSI ; 5 H` is "row default, column 5" and
+  `38:2::255:0:0` has an empty third field, so an absent parameter has to survive as absent rather
+  than collapsing into a zero. That was a real bug, caught by the test that names it.
+- **The screen is parallel `IntArray`/`LongArray`, never objects.** A 200×50 screen over 10 000
+  lines of scrollback is two million cells; as objects that is two million allocations for the
+  collector to walk, and a `yes` flood is then spent in the collector rather than the parser.
+  `CellStyle` packs a foreground, a background and the attributes into one `Long` (26 + 26 + 12
+  bits) — the one thing that does not fit is SGR 58's underline colour, which belongs in a side
+  table rather than in every cell.
+- **The deferred wrap is where every implementation goes wrong once.** Writing into the last
+  column does not move the cursor off the line; it leaves it there with a flag, and only the *next*
+  character wraps. Without that, a program that fills a line exactly and then returns the carriage
+  has already scrolled, and every full-width box a TUI draws sits one line low.
+- **Answering `DECRQM` is a promise, not a formality.** 2 means "supported, currently off"; 0 means
+  "never heard of it". Both agent CLIs ask about synchronized output (2026) that way, and answering
+  0 makes them redraw in pieces you can watch tear. So `Modes.KNOWN` is a list of promises — adding
+  a mode there without implementing it is worse than leaving it out.
+- **Blank cells keep the current background**, which is what `BCE` means: a program that paints a
+  coloured panel and clears part of it expects the hole to stay the panel's colour, not to become a
+  white gash.
+- **The terminal answers as itself.** `DA1` is `CSI ? 62;22c` (a VT220 with colour), `DA2` is
+  deliberately modest and `XTVERSION` says `Forest(1.0)` rather than impersonating an xterm patch
+  level — programs that recognise a specific xterm take paths written for xterm, and we are not it.
+- **History is written only when the whole primary screen scrolls.** A program that set a scroll
+  region is managing a pane of its own, and its discarded rows would fill your shell's scrollback
+  with the middle of a progress bar. The alternate screen writes none at all, and leaving it finds
+  the primary screen exactly as it was — that is why quitting `less` does not bury what you ran.
+
+- **Character sets are implemented, and that is not history.** `tmux`, `dialog` and everything on
+  `ncurses` still designate DEC special graphics, because a terminfo entry says the terminal has it;
+  a terminal that ignores the designation prints `qqqq` where a rule was wanted and `lqqk` for a
+  corner, which is the most recognisable symptom of an emulator that stopped short. The part that
+  catches implementations out is the **single shift**: `SS2`/`SS3` last exactly one character, not
+  until the next escape, and `a single shift lasts exactly one character` is the test that says so.
+  `REP` repeats what reached the screen, so the translation happens before it is recorded.
+- **The cursor's shape is not decoration.** A modal editor sets a bar in insert mode and a block in
+  normal mode, and that is often the only thing on screen saying which mode you are in — so
+  `DECSCUSR` is carried on the model and drawn, with the odd request numbers blinking and the even
+  ones still. Three separate reasons stop the cursor being drawn at all, and each is a real case:
+  the pane is not focused, it is scrolled back into history where the cursor is not, or the program
+  hid it with `DECTCEM` while it repaints.
+
+**Resizing rewraps** (`Reflow.kt`). Without it, narrowing a pane throws away everything past the
+new edge and widening leaves the old breaks in place, so a paragraph of build output stays ragged
+for the rest of the session. `TerminalLine.wrapped` is the whole mechanism — it is the only record
+of the difference between "the program printed a newline here" and "the terminal ran out of room
+here", and only the second may be undone. Four rules, each with a test that names it:
+
+- the primary screen and its history rewrap **together**, because a wrapped line can straddle the
+  boundary between them and rewrapping the two separately would leave a break in the middle of a
+  line that has just become joinable;
+- the alternate screen is **not** rewrapped: it belongs to a full-screen program that will redraw
+  it for the new size, and a rewrap would fight that redraw with a stale copy of the old screen;
+- the cursor keeps the *character* it was on rather than its row and column, or a prompt jumps out
+  from under the person typing into it — which is why the cursor goes into the resize in document
+  coordinates and comes back in them;
+- a double-width character is never split across the new edge, and narrow → wide → narrow gives
+  back what was there.
+
+**Every line in the buffer is exactly `columns` wide, and a resize is what breaks that silently.**
+The painter walks a row to `model.columns` and the emulator writes at `cursorColumn`, neither
+asking a line how wide it is — so one line left at the old width keeps working until something
+reaches past its end, and then throws on another thread, in a method with nothing to do with
+resizing, minutes later. That happened: padding lines were created from the property rather than
+from the new width, and growing a pane while a full-screen program was running produced `Index 348
+out of bounds for length 80` on the reader thread. The width is now passed to each collection
+explicitly, and `ResizeInvariantTest` checks the invariant across screen, alternate screen and
+history rather than trusting it.
+
+Shrinking keeps the **newest** rows and pushes the oldest into history, which is the opposite of
+what the crude implementation did: the prompt is at the bottom of a shell's screen, and a pane that
+kept the top rows would hide what the user is typing into behind whatever scrolled past an hour ago.
+
+**Two side tables hang off a line, and both are usually null.** A cell holds one code point and one
+style, which is all almost every cell needs, so anything rarer lives beside the arrays rather than
+widening them:
+
+- **combining marks**, a `HashMap` per line that is allocated only when something needs one. A
+  zero-width character belongs to the cell before it — an accent written separately from its letter,
+  or the joiners a family emoji is built from — and dropping them turns one thing on the screen into
+  several. "The cell before the cursor" is not simply one to the left: after a double-width
+  character the cursor is two columns along, and the mark belongs to the character rather than to
+  its continuation cell. Marks move with their cells through `ICH`/`DCH` and through a rewrap, and
+  they are copied with them, because an accent left behind on the clipboard makes a pasted word a
+  different word.
+- **hyperlinks** (`OSC 8`), an `IntArray` of ids allocated the first time a line carries one. Cells
+  hold an id rather than an address, so a thousand cells of one link cost a thousand ints and two
+  runs of the same address can still be told apart. Only the link **under the pointer** is
+  underlined: underlining every one would put a rule under half a coloured build log, and a link
+  matters at the moment you are about to click it. Opening it is the application's job, handed out
+  through a callback — `:terminal` does not know what a browser is.
+
+A cell that carries marks is drawn as a cluster rather than as a glyph, which breaks the run: the
+accent has to be placed against its letter, and that is the shaper's work, not arithmetic's.
+
+Known gaps, each deliberate and each with a name: left and right margins are not implemented and,
+more to the point, **not advertised**, so nothing asks for them; `CharWidth` is a hand-written range
+table rather than one generated from `EastAsianWidth.txt`; and there is no conformance suite —
+`JediTermDifferentialTest` is what stands in for one.
+
+`LiveTerminalTest` is the one place the halves are checked together — a real `/bin/sh` on a real
+pty, chunked however the kernel chose, drawn by the emulator.
+
+#### Recorded streams, and the reference beside them
+
+`./gradlew :terminal:recordFixtures` records what `vim`, `less`, `tmux` and a shell actually print
+into `terminal/src/jvmTest/resources/term/`, each with a committed screen dump reviewed once by eye.
+A tool rather than a test, the same arrangement as `generateIcons`: the suite must not depend on
+`vim` being installed, and the recordings are the *input* to the tests rather than a product of
+them. Three things about the recorder were learnt the hard way and are worth keeping:
+
+- it drives **our own pty**, not `script`, which fixes the terminal size so a program lays itself
+  out identically every time, and makes a recording that cannot be made a pty bug found early;
+- it **snapshots the bytes before closing the pty**, because closing hangs the terminal up and a
+  full-screen program's last act is to leave the alternate screen and print why it died — a
+  recording taken afterwards is of vim's obituary rather than of vim;
+- tmux gets a config of its own, because the default status line carries the machine's hostname and
+  a clock: one would commit somebody's machine name to the repository and the other would make the
+  recording different every minute.
+
+**The highest-yield test in the suite is `a recorded stream paints the same screen however it is
+chopped up`.** Almost every real emulator bug is a parser state that did not survive a `read(2)`
+boundary, and a pty hands over whatever happened to be in its buffer — so those splits happen
+constantly under load and never while anyone is watching. Each recording is chopped at twenty sets
+of random offsets with a fixed seed, and then fed one byte at a time.
+
+`JediTermDifferentialTest` feeds the same bytes to both engines and compares the screens: a free
+oracle for exactly as long as both exist, and scaffolding that goes when JediTerm does (its
+dependency is `jvmTest` only, so it reaches no bundle and no notice). JediTerm is a **reference, not
+an authority**. Two divergences are already recorded, and each is a fact worth knowing: it marks the
+right half of a wide character with a private-use code point where we leave the cell out of the text
+— a difference in how a screen is written down, not in what is on it — and it prints a stray `:`
+for `CSI 4:3 m` because it follows the 1970s table into its ignore state. The second one is asserted
+in a test of its own, so a change on either side has to come and look at it.
+
+`TerminalThroughputTest` holds the budgets, set well under what this machine does (about 150 MB/s of
+plain output) so a failure means a regression rather than a busy afternoon: 30 MB/s plain, 15 MB/s
+coloured, 20 MB/s on a 400-column pane, and a history that stops at its ceiling however much is
+printed. A terminal that cannot outrun a pty is not slow, it is broken.
+
+#### The pseudo-terminal of our own
+
+`terminal/jvmMain/.../pty/` starts a process on a pty through `java.lang.foreign` — no JNA, no
+native library of ours, nothing in the bundle that has to be signed, hardened or notarized. The
+trick that makes it possible without the fork helper every JVM pty library ships (and which is what
+Apple rejected this app's first notarization over) is two-sided: `POSIX_SPAWN_SETSID` makes the
+child a session leader with no controlling terminal, and a `posix_spawn` file action that **opens
+the slave by path** onto fd 0/1/2 is what then gives it one — a session leader that opens a terminal
+without `O_NOCTTY` acquires it. `posix_spawn_file_actions_addchdir_np` supplies the working
+directory, so the command line a pane was asked to run is never rewritten into a `cd … && exec …`.
+
+Four details there were established by probing, and each one silently breaks something:
+
+- **`ioctl` is variadic**, so its downcall needs `Linker.Option.firstVariadicArg(2)`; without it the
+  arguments go in registers on arm64 macOS where the callee reads the stack, and the call does the
+  wrong thing rather than failing.
+- **`posix_spawn` returns its errno** instead of setting it, unlike every other call there.
+- **Darwin gives a pty no tty structure until a slave is open**, so `TIOCSWINSZ` on the master fails
+  with `ENOTTY` unless the parent opens a slave first — and it must close that slave the moment the
+  child is spawned, because while the parent holds one the master never sees end of file.
+- **A pty discards buffered output when its last slave closes**, so a caller must read before
+  reaping. `UnixPty` reaps lazily (`waitpid` with `WNOHANG` from whatever first asks `isAlive`)
+  rather than from a thread per session, for that reason as much as for the thread.
+
+The arena is `Arena.ofAuto`: a confined or shared one would have to be closed, and closing it under
+a reader blocked in `read(2)` is a use-after-free. `PtyTest` runs a real `/bin/sh` for each claim —
+`tty` answers only where there is a controlling terminal, `stty size` proves `TIOCSWINSZ` is the
+right constant on this platform, and a `trap … WINCH` proves a resize reaches the child as a signal.
+
+#### The view, and two engines side by side
+
+`terminal/commonMain/.../term/ui/` draws a pane with Compose: one `Canvas`, `drawIntoCanvas` down
+to Skia, and no Swing anywhere. Being an ordinary composable is most of the point — the pane it
+replaces is heavyweight, and everything awkward about that follows from it.
+
+- **The grid is never laid out.** One advance is measured from `M`, every glyph is placed at
+  `column * cellWidth`, and the type system is only ever asked *which* glyph. Drawing is three
+  passes — background runs, text runs as one `TextBlob` each, then the rules for underline and
+  strikethrough — so the call count follows the runs on a row, not its cells.
+- **Repainting is driven by frames, not by output.** The model's generation is compared once per
+  frame, so a megabyte of output causes one repaint rather than a thousand: a flood is survived in
+  the parser, which is fast, rather than in the renderer, which is not. While a program holds
+  synchronized output open the comparison is skipped, so a half-drawn screen is never shown.
+- **Skia takes pixels, a font size is quoted in points.** A retina screen is two pixels to the
+  point, so handing Skia the point size directly draws a pane at half the size of the one beside
+  it — small enough to notice and hard enough to explain, which is exactly what happened. AWT did
+  that conversion invisibly for the Swing pane; here `rememberTerminalGlyphs` reads
+  `LocalDensity` and multiplies, and `a cell is twice the size on a screen with twice the pixels`
+  pins it.
+- **Font fallback is ours now.** AWT did it invisibly for the Swing pane; here `TerminalGlyphs`
+  asks Skia's font manager per code point and caches it. That is the hidden cost of "emoji and CJK
+  work", and it is why `hasGlyph` is checked before every run.
+- **Reverse video is resolved in the painter, not the cell**, because it swaps what the colours
+  *became*: a reversed cell with a default foreground takes the background's actual colour, and
+  only the palette knows what that is.
+- `TerminalViewTest` renders the whole thing off screen into `terminal/build/reports/terminal-view.png`,
+  and `TerminalPainterTest` paints straight onto a Skia surface for the scrollback and the selection
+  (`terminal-scrollback.png`, `terminal-selection.png`) and then **reads the pixels back**. That this
+  can exist at all is itself a result — `AppRenderTest` has always had to stand a coloured box in
+  for the Swing pane. Sample the *corner* of a cell rather than its middle: the middle is where the
+  glyph is, and a sample that lands on the ink reports the text colour whatever the background did.
+
+The pointer and the wheel follow one rule: **they belong to the program only when it asked for
+them, and never while `Shift` is held.** That override is how every terminal lets you select text
+inside a full-screen program that has taken the mouse; without it, copying out of `vim` is
+impossible. `MouseEncoder` decides *what* to send — the modern `SGR` form when a program turned it
+on, the original three-byte form otherwise, which simply cannot express a column past 223 and
+reports nothing rather than a wrong number. Reporting more than was asked for is not harmless: a
+program in click mode reads motion reports as gibberish keystrokes.
+
+Selection is in document coordinates, not screen ones (`TerminalPosition` counts from the oldest
+line of history), because a selection anchored to a screen row slides up a line every time a build
+prints something. Copying joins lines that `wrapped` rather than breaking them — a wrapped path
+pasted back with a newline in the middle is the classic terminal annoyance, and the flag exists to
+avoid it. Copy happens on release rather than on a shortcut: a selection that vanishes when you
+reach for the keyboard is no selection.
+
+`OSC` carries the two decisions with consequences beyond drawing. **`OSC 4` repaints the palette of
+one pane**, not of every pane — the palette lives on the model, and a query is answered rather than
+ignored because a program that asks what colour 4 is and hears nothing decides the terminal has no
+colours at all. **`OSC 52` writes to the clipboard and will never read from it**: answering a read
+would let anything able to write to a terminal — a `cat` of a file someone sent you — exfiltrate
+whatever you last copied. That refusal is a decision with a test (`a program cannot read the
+clipboard`), not an unimplemented case.
+
+**Both engines run side by side, and each pane remembers its own.** `TerminalBackends` is a routing
+table rather than a global `if`: an engine cannot be changed under a running pane, because its
+process is attached to one implementation. The setting therefore decides what the *next* pane opens
+on, live panes finish on the engine they started with, and both can be on screen at once — which is
+also the best way to compare them. The choice lives in `~/.worktree/terminal` beside `recent` and
+`last`, and is made from the sliders button in the Projects header; `FOREST_TERMINAL` overrides it
+for one run but is not how a user switches, because an app launched from Finder never sees a
+variable — the same reason a packaged build could not find `claude` on its `PATH`. The menu is
+filled in from `main.kt` through `ui/TerminalEngines.kt`, the same platform-fills-a-global pattern
+as `AgentShortcuts` and `WindowChrome`, so nothing in `:shared` knows that one of the engines is a
+Swing widget — and a build with one engine has no such menu at all.
+
+That coexistence has a price, and it is deliberate: while the Swing engine can still be chosen,
+`compose.interop.blending`, the `suspended` detach-while-a-modal-is-open and the global AWT key
+dispatcher all have to keep working. They are not leftovers.
+
+**The window talks to a terminal only through `TerminalBackend`.** The composable slot `App` already
+took (`terminal: @Composable (session, focused, modifier) -> Unit`, filled in by `main.kt`) draws a
+pane; the interface carries the rest of the surface — the focus report and the session lifecycle —
+and `TerminalSessionManager` is its JediTerm implementation. `main.kt` types the field as the
+interface deliberately: that one line is the whole reason a second implementation is a matter of
+writing one rather than of unpicking the app. `EmbeddedTerminal` is `internal` for the same reason —
+nothing outside this package reaches a particular terminal's own composable.
 
 Four constraints worth remembering:
 

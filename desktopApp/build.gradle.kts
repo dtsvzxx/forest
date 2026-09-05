@@ -6,8 +6,20 @@ plugins {
     alias(libs.plugins.composeCompiler)
 }
 
+/**
+ * Pinned rather than left to whatever JVM runs the daemon.
+ *
+ * The terminal's pseudo-terminal is being moved onto `java.lang.foreign`, which is final only from
+ * JDK 22 and gained its `Linker.Option`s across several releases — so the version that compiles
+ * this is a behavioural fact about the app, not a detail of the machine it was built on.
+ */
+kotlin {
+    jvmToolchain(25)
+}
+
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":terminal"))
 
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutinesSwing)
@@ -45,6 +57,11 @@ compose.desktop {
     application {
         mainClass = "io.mainactor.worktree.MainKt"
 
+        // The terminal's pseudo-terminal calls into libc through java.lang.foreign, and since
+        // JDK 24 every restricted call without this warns once per module — on JDK 26 it becomes
+        // an error. Set here so the packaged Forest.cfg carries it, not only a developer's `run`.
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Forest"
@@ -69,7 +86,9 @@ compose.desktop {
                 dockName = "Forest"
                 appCategory = "public.app-category.developer-tools"
                 // jpackage writes 10.13 by default, which this cannot honour: the bundled runtime
-                // is an arm64 JDK 21 and the app has never been built for anything older.
+                // is an arm64 JDK 25 and the app has never been built for anything older. 11.0 is
+                // read off the binaries rather than guessed — `libjvm.dylib` and Skiko's library
+                // both carry `LC_BUILD_VERSION minos 11.0`.
                 minimumSystemVersion = "11.0"
                 // Pinned rather than left to the plugin's default so the re-signing below applies
                 // exactly the same set; the two drifting apart would change how the app behaves.
@@ -99,6 +118,11 @@ compose.desktop {
             linux { iconFile.set(project.file("icons/forest.png")) }
         }
     }
+}
+
+// Tests reach the same restricted calls the app does, and a warning banner on every run is noise.
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 /**

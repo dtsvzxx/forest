@@ -7,6 +7,9 @@ plugins {
 kotlin {
     jvm()
 
+    // Same version as :desktopApp — see the note on its own toolchain block.
+    jvmToolchain(25)
+
     sourceSets {
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -25,4 +28,9 @@ kotlin {
             implementation(libs.kotlin.test)
         }
     }
+}
+
+// The pseudo-terminal's tests call libc through java.lang.foreign; see :desktopApp for why.
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }

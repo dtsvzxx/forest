@@ -19,9 +19,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,6 +41,7 @@ import io.mainactor.worktree.ui.components.ListRow
 import io.mainactor.worktree.ui.components.ToolButton
 import io.mainactor.worktree.ui.components.ToolWindowHeader
 import io.mainactor.worktree.ui.components.Tooltip
+import io.mainactor.worktree.ui.TerminalEngines
 import io.mainactor.worktree.ui.theme.LocalWorktreeColors
 
 /**
@@ -68,6 +75,7 @@ fun ProjectsPane(
                 detail = "git clone <url>",
                 onClick = onClone,
             )
+            TerminalEngineButton()
         }
         HorizontalDivider()
 
@@ -95,6 +103,68 @@ fun ProjectsPane(
                 adapter = rememberScrollbarAdapter(listState),
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
+        }
+    }
+}
+
+/**
+ * Picks the terminal a new pane opens on, when there is more than one to pick from.
+ *
+ * Absent unless the platform layer filled [TerminalEngines] in, so this costs nothing on a build
+ * with a single engine and never appears in a render test.
+ */
+@Composable
+private fun TerminalEngineButton() {
+    val colors = LocalWorktreeColors.current
+    val options = TerminalEngines.options
+    if (options.size < 2) return
+    var open by remember { mutableStateOf(false) }
+
+    Box {
+        ToolButton(
+            icon = IconKind.SETTINGS,
+            tooltip = "Which terminal a new pane opens on",
+            detail = "Running panes keep the one they started with",
+            onClick = { open = true },
+        )
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.background(colors.panelAlt),
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (option.id == TerminalEngines.selected) {
+                                    IdeIcon(IconKind.CHECK, colors.accent, size = 11.dp)
+                                } else {
+                                    Spacer(Modifier.width(11.dp))
+                                }
+                                Text(
+                                    option.label,
+                                    color = colors.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Text(
+                                option.detail,
+                                color = colors.textDim,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(start = 17.dp),
+                            )
+                        }
+                    },
+                    onClick = {
+                        open = false
+                        TerminalEngines.choose(option.id)
+                    },
+                )
+            }
         }
     }
 }
