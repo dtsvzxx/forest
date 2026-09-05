@@ -344,6 +344,10 @@ private fun handleKey(
     scrollToBottom: () -> Unit,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
+    // A modifier on its own is not input. It arrives with no character — AWT's `CHAR_UNDEFINED`,
+    // which is U+FFFF — and a pane that passes that on sends the shell a code point nothing can
+    // draw: press Shift and a box reading FFFF appears in what you were typing.
+    if (event.key in MODIFIER_KEYS) return false
     val modifiers = KeyModifiers(
         shift = event.isShiftPressed,
         alt = event.isAltPressed,
@@ -414,3 +418,18 @@ private fun terminalKeyOf(key: Key): TerminalKey? = when (key) {
     Key.F12 -> TerminalKey.F12
     else -> null
 }
+
+/**
+ * Keys that mean "and also", never a character of their own.
+ *
+ * `KeyEncoder` refuses the code point these arrive with as well; this is the same statement made
+ * where it can be read — a bare modifier is not something the program on the other end hears about.
+ */
+private val MODIFIER_KEYS = setOf(
+    Key.ShiftLeft, Key.ShiftRight,
+    Key.CtrlLeft, Key.CtrlRight,
+    Key.AltLeft, Key.AltRight,
+    Key.MetaLeft, Key.MetaRight,
+    Key.CapsLock, Key.NumLock, Key.ScrollLock,
+    Key.Function,
+)

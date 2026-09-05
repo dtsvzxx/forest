@@ -3,6 +3,9 @@ package io.mainactor.worktree.term.ui
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.unit.Density
 import io.mainactor.worktree.term.TerminalModel
 import io.mainactor.worktree.term.TerminalPane
@@ -111,6 +114,55 @@ class TerminalViewTest {
     }
 
     /** The pane tells the emulator and the child how many cells it actually has room for. */
+    /**
+     * A key down as the window delivers it.
+     *
+     * The code point is the part that matters: AWT reports `CHAR_UNDEFINED` — U+FFFF — for a key
+     * that carries no character, and that is what a bare modifier is.
+     */
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    private fun keyDown(key: Key, codePoint: Int, shift: Boolean = false) =
+        KeyEvent(key = key, type = KeyEventType.KeyDown, codePoint = codePoint, isShiftPressed = shift)
+
+    /**
+     * A modifier on its own is not input.
+     *
+     * It arrives with no character — AWT spells that `CHAR_UNDEFINED`, which is U+FFFF — and a pane
+     * that passes it on sends the shell a code point nothing can draw: a box reading FFFF, or a
+     * question mark, appearing in the middle of what you were typing. Reported from a real pane.
+     */
+    @Test
+    fun `pressing a modifier on its own sends nothing`() {
+        val pane = FakePane(TerminalModel(80, 20))
+        val scene = scene(pane)
+        try {
+            scene.render()
+            listOf(Key.ShiftLeft, Key.ShiftRight, Key.CtrlLeft, Key.AltLeft, Key.CapsLock)
+                .forEach { key -> scene.sendKeyEvent(keyDown(key, CHAR_UNDEFINED, shift = true)) }
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        assertEquals(emptyList(), pane.sent, "a modifier key reached the shell")
+    }
+
+    /** And an ordinary key still does, or the guard above would be a pane you cannot type in. */
+    @Test
+    fun `pressing a letter still sends it`() {
+        val pane = FakePane(TerminalModel(80, 20))
+        val scene = scene(pane)
+        try {
+            scene.render()
+            scene.sendKeyEvent(keyDown(Key.A, 'a'.code))
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        assertEquals(listOf("a"), pane.sent)
+    }
+
     @Test
     fun `laying the pane out sets the size in cells`() {
         val pane = FakePane(TerminalModel(80, 24))
@@ -128,3 +180,6 @@ class TerminalViewTest {
         assertEquals(size.second, pane.model.rows)
     }
 }
+
+/** `java.awt.event.KeyEvent.CHAR_UNDEFINED`: what a key with no character of its own reports. */
+private const val CHAR_UNDEFINED = 0xFFFF

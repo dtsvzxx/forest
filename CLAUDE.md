@@ -584,6 +584,16 @@ replaces is heavyweight, and everything awkward about that follows from it.
   for the Swing pane. Sample the *corner* of a cell rather than its middle: the middle is where the
   glyph is, and a sample that lands on the ink reports the text colour whatever the background did.
 
+**A key press with no character of its own is not input.** AWT reports one as `CHAR_UNDEFINED`,
+which is U+FFFF, and every bare modifier arrives that way — so a pane that forwards the code point
+sends the shell something nothing can draw, and pressing `Shift` puts a box reading FFFF (or a
+question mark, depending on the font) into whatever you were typing. That happened. Two guards say
+it, deliberately: `handleKey` drops the modifier keys by name, which is the statement a reader
+wants, and `KeyEncoder.encodeCharacter` refuses U+FFFF and its noncharacter neighbour, which is the
+one that holds whatever a toolkit decides to call the key. `pressing a modifier on its own sends
+nothing` drives real key events through a scene, and `pressing a letter still sends it` is there
+because a guard that swallows too much is a pane you cannot type in.
+
 The pointer and the wheel follow one rule: **they belong to the program only when it asked for
 them, and never while `Shift` is held.** That override is how every terminal lets you select text
 inside a full-screen program that has taken the mouse; without it, copying out of `vim` is

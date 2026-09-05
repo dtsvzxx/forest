@@ -91,6 +91,12 @@ object KeyEncoder {
      */
     fun encodeCharacter(codePoint: Int, modifiers: KeyModifiers): String? {
         if (modifiers.meta) return null // ⌘ belongs to the application, never to the pane
+        // A key press that carries no character is not input. AWT says so with `CHAR_UNDEFINED`,
+        // which is U+FFFF, and every bare modifier arrives that way: press Shift on its own and
+        // the pane would send a code point nothing can draw — a box with FFFF in it, or a question
+        // mark, straight into whatever the shell was reading. U+FFFE is its neighbour and is a
+        // noncharacter for the same reason; neither is anything a keyboard produces.
+        if (codePoint == NOT_A_CHARACTER || codePoint == NOT_A_CHARACTER - 1) return null
         val text = when {
             // Some toolkits report `Ctrl+C` as the letter and some as the byte it names. Either is
             // fine as long as both arrive as the byte, and a terminal that guesses wrong sends
@@ -112,6 +118,9 @@ object KeyEncoder {
         val cleaned = text.replace("\r\n", "\r").replace('\n', '\r')
         return if (modes.bracketedPaste) "${CSI}200~$cleaned${CSI}201~" else cleaned
     }
+
+    /** `java.awt.event.KeyEvent.CHAR_UNDEFINED`, and a Unicode noncharacter wherever it comes from. */
+    private const val NOT_A_CHARACTER = 0xFFFF
 
     private fun controlCode(codePoint: Int): String? {
         val upper = codePoint.toChar().uppercaseChar()
