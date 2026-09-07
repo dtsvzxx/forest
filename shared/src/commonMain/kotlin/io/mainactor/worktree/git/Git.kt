@@ -172,11 +172,21 @@ class Git(
             .toMap()
     }
 
+    /**
+     * `git log`, newest first.
+     *
+     * The date is `%cr`, the **committer** date, because that is the clock git orders the list by —
+     * its walk is a priority queue on committer time. `%ar` was in the column, and a rebased or
+     * cherry-picked commit keeps its author date, so a branch whose work was written six weeks ago
+     * and landed on stage today sat at the top of the list reading "6 weeks ago" over rows saying
+     * "7 days ago". Nothing was mis-sorted; the column was quoting a different clock from the
+     * order. It is also the clock the worktree list is dated by ([commitTimes], `%ct`).
+     */
     suspend fun log(dir: String, limit: Int = 200, ref: String? = null): List<CommitInfo> {
         val fs = GitParsers.FS
         val args = mutableListOf(
             "log", "--max-count=$limit",
-            "--format=%H$fs%h$fs%s$fs%an$fs%ar$fs%D",
+            "--format=%H$fs%h$fs%s$fs%an$fs%cr$fs%D",
         )
         if (ref != null) args += ref
         val r = run(dir, args)
@@ -212,7 +222,7 @@ class Git(
         val r = run(
             dir,
             "log", "--max-count=$limit", "--follow",
-            "--format=%H$fs%h$fs%s$fs%an$fs%ar$fs%D", "--", path,
+            "--format=%H$fs%h$fs%s$fs%an$fs%cr$fs%D", "--", path,
         )
         return if (r.ok) GitParsers.parseLog(r.stdout) else emptyList()
     }

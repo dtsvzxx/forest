@@ -128,6 +128,14 @@ one child process for the whole commit — the Log tab's file list is the `path`
 `FileDiff`, not a second `--name-status` call — and nothing calls it until a commit is clicked,
 because the Log tab is opened to scan subjects far more often than to read a patch.
 
+**The Log tab's age column is the committer date** (`%cr`), because that is the clock git orders
+the walk by. It was `%ar`, the author date, and the two disagree for exactly the commits a shared
+repository is full of: a rebase or a cherry-pick keeps the author date and takes a new committer
+date, so the top row of a real repository read "6 weeks ago" over rows saying "7 days ago" and the
+list looked shuffled while being perfectly sorted. It is also the clock `commitTimes` (`%ct`) dates
+the worktree list by. `the log's age is the one git sorts by` pins it, and checks the two clocks
+really disagree in its fixture rather than passing on a repository where they cannot.
+
 **File search** is `Git.listFiles` (`git ls-files -z`) once per worktree, filtered in memory by
 `AppState.search` — a child process per keystroke on a tree of twenty thousand files is the
 difference between instant and unusable. The index is not snapshot state (it is large and never

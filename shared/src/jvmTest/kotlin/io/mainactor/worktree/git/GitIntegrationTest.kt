@@ -8,10 +8,13 @@ import io.mainactor.worktree.platform.ProcessCommandRunner
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -57,6 +60,43 @@ class GitIntegrationTest {
 
     private fun write(name: String, content: String, dir: File = main) {
         File(dir, name).writeText(content)
+    }
+
+    /**
+     * The bug this pins: the Log tab's age column disagreed with the order it was sorting in.
+     *
+     * git walks the log by **committer** time, and the column was `%ar`, the *author* time. A
+     * rebased or cherry-picked commit keeps its author date, so the top row of a real repository
+     * read "6 weeks ago" over rows saying "7 days ago" — the list looked shuffled and was not.
+     */
+    @Test
+    fun `the log's age is the one git sorts by`() {
+        if (!gitAvailable) return
+        runBlocking {
+            // What a rebase leaves behind: written a year ago, landed on this branch just now.
+            write("rebased.txt", "x\n")
+            git.stageAll(main.path)
+            val committed = ProcessCommandRunner().exec(
+                workDir = main.path,
+                command = listOf(
+                    GitLocator.locate(), "commit", "-m", "rebased work",
+                    "--date", Instant.now().minus(400, ChronoUnit.DAYS).toString(),
+                ),
+                env = mapOf("GIT_COMMITTER_DATE" to Instant.now().toString()),
+            )
+            assertTrue(committed.ok, committed.message)
+
+            // The setup is only worth anything if the two clocks really disagree.
+            val authored = git.run(main.path, "log", "-1", "--format=%ar").stdout.trim()
+            assertTrue("year" in authored, "the author date is not a year back: $authored")
+
+            val log = git.log(main.path)
+            assertEquals("rebased work", log.first().subject, "git no longer walks by committer time")
+            assertFalse(
+                "year" in log.first().relativeDate,
+                "the column is quoting the author clock again: ${log.first().relativeDate}",
+            )
+        }
     }
 
     @Test

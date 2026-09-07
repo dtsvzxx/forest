@@ -109,6 +109,7 @@ data class CommitInfo(
     val shortHash: String,
     val subject: String,
     val author: String,
+    /** How long ago the commit was *committed* (`%cr`) — the clock git orders the log by. */
     val relativeDate: String,
     val refs: List<String> = emptyList(),
 )
