@@ -304,6 +304,34 @@ Layout traps that have already bitten this code:
   (measured once from the longest line); rows of differing widths clamp their scroll offsets
   differently and drift apart.
 
+### Syntax highlighting
+
+`SyntaxHighlighter` is an interface in `commonMain` with `TreeSitterHighlighter` behind it, the same
+shape as `CommandRunner` — the parser is native code, and it is why a render test can run with
+`SyntaxHighlighter.None` and no colour at all. The mapping from a parse tree to a colour is
+deliberately *structural* rather than a table per language: an anonymous node whose type is all
+letters is a keyword, a named node whose type ends in `comment` is a comment. That is a guess about
+grammars nobody here wrote, and it works for one nobody has looked at yet.
+
+**tree-sitter counts bytes; a Kotlin `String` counts UTF-16 code units.** The two agree only while
+the text is ASCII, so a node's `startByte` used straight as a string index paints everything after
+the first accented letter, em dash, CJK character or emoji that many positions to the right, and
+the drift accumulates down the file: a comment eating the first characters of the next line, a
+keyword painted over the space beside it. This repository's own sources are the worst case — their
+comments are made of em dashes, three bytes to one char. `CharOffsets` converts, and builds its
+table only when the text is not all ASCII. It counts a surrogate as two bytes because a pair is
+four between them, which was *checked* rather than assumed: the binding hands the parser real UTF-8
+rather than the JVM's modified form, where an emoji would have cost six. `a colour lands where the
+character is, not where its bytes are` pins it across all four widths.
+
+**A patch is two files, not one** (`DiffHighlighting`). A deleted line comes from the old file and
+an added one from the new, so the patch is reassembled into two texts — context plus deletions, and
+context plus additions — each parsed alone. Parsed as they appear on screen instead, an added
+comment opener closes over the deleted lines beneath it and a deleted triple quote swallows the
+rest of the hunk. Both directions have a test. What no amount of care fixes is that three lines of
+context can begin inside a block comment with nothing to say so; the whole-file toggle is the
+answer, and with it the parse is exact rather than plausible.
+
 ### Modes
 
 `AppState.mode` picks between the three-pane project view and `AgentsPane`, a wall of terminals for

@@ -63,9 +63,10 @@ class TreeSitterHighlighter : SyntaxHighlighter {
         return synchronized(lock) {
             val parser = parserFor(language) ?: return emptyList()
             val tokens = ArrayList<Token>(text.length / 16)
+            val offsets = CharOffsets.of(text)
             runCatching {
                 val tree = parser.parseString(null, text)
-                collect(tree.rootNode, text.length, tokens)
+                collect(tree.rootNode, offsets, tokens)
             }.getOrElse { return emptyList() }
             tokens
         }
@@ -86,16 +87,16 @@ class TreeSitterHighlighter : SyntaxHighlighter {
      * The exception is a node whose children carry colour of their own, which is why the walk
      * continues into anything it did not classify.
      */
-    private fun collect(node: TSNode, length: Int, into: MutableList<Token>) {
+    private fun collect(node: TSNode, offsets: CharOffsets, into: MutableList<Token>) {
         val kind = kindOf(node)
         if (kind != null) {
-            val start = node.startByte
-            val end = minOf(node.endByte, length)
+            val start = offsets.charAt(node.startByte)
+            val end = offsets.charAt(node.endByte)
             if (end > start) into += Token(start, end, kind)
             if (kind == TokenKind.STRING || kind == TokenKind.COMMENT) return
         }
         val children = node.childCount
-        for (index in 0 until children) collect(node.getChild(index), length, into)
+        for (index in 0 until children) collect(node.getChild(index), offsets, into)
     }
 
     private fun kindOf(node: TSNode): TokenKind? {
@@ -172,5 +173,69 @@ class TreeSitterHighlighter : SyntaxHighlighter {
             ".bash_profile" to "bash",
             ".zprofile" to "bash",
         )
+    }
+}
+
+/**
+ * Turns tree-sitter's offsets into indices into the Kotlin string they came from.
+ *
+ * **tree-sitter counts bytes; a `String` counts UTF-16 code units**, and the two agree only while
+ * the text is ASCII. They stop agreeing at the first accented letter, em dash, CJK character or
+ * emoji, and everything after it is coloured that many positions to the right — a comment that
+ * eats the first two characters of the next line, a keyword painted across the space beside it. It
+ * gets worse down the file, since the drift accumulates. This repository's own sources are the
+ * worst case: their comments are full of em dashes, three bytes each against one char.
+ *
+ * The map is built only when the text is not all ASCII, which is most files; for the rest the
+ * offsets are already right and the identity costs one scan. Byte offsets from a parse always land
+ * on a character boundary, but a search that missed one still resolves to the character containing
+ * it rather than throwing.
+ */
+private class CharOffsets private constructor(
+    /** Byte offset of each char, plus the total at the end. Null while the text is all ASCII. */
+    private val byteAt: IntArray?,
+    private val length: Int,
+) {
+
+    /** The index into the string of the character starting at byte [byte], clamped to the text. */
+    fun charAt(byte: Int): Int {
+        val map = byteAt ?: return byte.coerceIn(0, length)
+        if (byte <= 0) return 0
+        if (byte >= map[length]) return length
+        val found = map.binarySearch(byte, 0, length + 1)
+        // Not found means the offset is inside a multi-byte character; take the one holding it.
+        return if (found >= 0) found else -found - 2
+    }
+
+    companion object {
+        fun of(text: String): CharOffsets {
+            var index = 0
+            while (index < text.length && text[index].code < 0x80) index++
+            if (index == text.length) return CharOffsets(null, text.length)
+
+            val map = IntArray(text.length + 1)
+            var bytes = 0
+            for (position in text.indices) {
+                map[position] = bytes
+                bytes += utf8Length(text[position])
+            }
+            map[text.length] = bytes
+            return CharOffsets(map, text.length)
+        }
+
+        /**
+         * How many UTF-8 bytes one `Char` becomes.
+         *
+         * A surrogate counts two, because the pair it belongs to is four bytes between them — the
+         * binding hands the parser real UTF-8 rather than the JVM's modified form, which was
+         * checked rather than assumed: an emoji shifts the offsets after it by exactly two, not by
+         * the four a CESU-8 encoding would give.
+         */
+        private fun utf8Length(c: Char): Int = when {
+            c.code < 0x80 -> 1
+            c.code < 0x800 -> 2
+            c.isSurrogate() -> 2
+            else -> 3
+        }
     }
 }

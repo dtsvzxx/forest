@@ -117,6 +117,57 @@ class TreeSitterHighlighterTest {
         assertEquals(emptyList(), highlighter.tokens("a.kt", ""))
     }
 
+    // ------------------------------------------------------- bytes against characters
+
+    /**
+     * The parser counts bytes and a `String` counts UTF-16 code units.
+     *
+     * They agree only while the text is ASCII, so every colour after the first accented letter,
+     * em dash or CJK character used to slide right by the bytes it cost — an em dash is three
+     * bytes to one char, so `val` was painted starting two characters late, over the space beside
+     * it, and the drift accumulated down the file. This repository's own sources are the worst
+     * case; their comments are made of em dashes.
+     */
+    @Test
+    fun `a colour lands where the character is, not where its bytes are`() {
+        for (prefix in listOf("plain", "an em dash —", "acuté", "日本語", "a tree 🌲")) {
+            val source = "// $prefix\nval answer = 42\n"
+            val coloured = coloured("a.kt", source)
+
+            assertEquals(
+                listOf("// $prefix"),
+                coloured.filter { it.first == TokenKind.COMMENT }.map { it.second },
+                "the comment ran past its end after \"$prefix\"",
+            )
+            assertTrue("val" in of(TokenKind.KEYWORD, "a.kt", source), "the keyword slid after \"$prefix\"")
+            assertTrue("42" in of(TokenKind.NUMBER, "a.kt", source), "the number slid after \"$prefix\"")
+        }
+    }
+
+    /** And nothing may reach past the end of the text, whatever the byte count said. */
+    @Test
+    fun `a colour cannot run off the end of the text`() {
+        val source = "val s = \"—————\"\n"
+        highlighter.tokens("a.kt", source).forEach {
+            assertTrue(it.end <= source.length, "a span ended at ${it.end} in a string of ${source.length}")
+            assertTrue(it.start in 0..it.end, "a span ran backwards: ${it.start}..${it.end}")
+        }
+    }
+
+    /** The same, through the patch path, which is where anyone would actually see it. */
+    @Test
+    fun `a line with a dash in it colours the line under it correctly`() {
+        val diff = patch(
+            DiffLineType.CONTEXT to "// a comment — with a dash",
+            DiffLineType.CONTEXT to "val answer = 42",
+        )
+
+        val spans = DiffHighlighting.of(diff, highlighter)[1].spans
+        val number = spans.single { it.kind == TokenKind.NUMBER }
+        assertEquals(13, number.start, "the line above shifted this one by its dash")
+        assertEquals(15, number.end)
+    }
+
     // ---------------------------------------------------------------- the patch, not the file
 
     private fun patch(vararg lines: Pair<DiffLineType, String>) = FileDiff(
