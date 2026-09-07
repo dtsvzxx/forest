@@ -70,6 +70,18 @@ reimplementation diverges from what the user sees in the terminal sitting next t
 invocation is funnelled through `Git.run`, which logs a `GitLogEntry` to the Console tab, forces
 `GIT_TERMINAL_PROMPT=0` (never block on a credential prompt) and disables colour/pager.
 
+**Creating a worktree from a remote branch is not `git worktree add <path> origin/feature`.** That
+resolves the ref, finds it is not a local branch, and checks the commit out **detached** — while
+reporting success, so the worktree is made and simply has no branch, which is what the dialog's
+branch picker used to do with every remote entry it listed. The command that means what was asked
+is `--track -b feature <path> origin/feature`, so `NewWorktreeDialog` keeps the selected `Branch`
+rather than its name (only `isRemote` tells `origin/feature` from a local branch called that) and
+sends a *new* branch on the remote ref. `--track` is explicit and not redundant: `-b` off a
+remote-tracking ref sets the upstream only because `branch.autoSetupMerge` defaults to true, and a
+user who turned it off would get a branch with no upstream. `a worktree made from a remote branch
+gets a local branch tracking it` pins all of it, including git's detaching — so the day git starts
+doing the friendly thing, the test says the workaround can go.
+
 **Worktree ordering** pins the main working tree to the top — it is the repository itself, not one
 of the disposable checkouts around it — and orders everything below it by last activity, most recent
 first (`AppState.withActivity`), with the age shown in the row and its source in the row's tooltip.

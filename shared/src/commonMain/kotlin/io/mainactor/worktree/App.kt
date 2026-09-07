@@ -345,6 +345,7 @@ private fun Dialogs(state: AppState, dialog: Dialog?, onDismiss: () -> Unit) {
                     existingBranch = request.existingBranch,
                     baseRef = request.baseRef,
                     force = request.force,
+                    track = request.track,
                 )
             },
         )

@@ -597,6 +597,69 @@ class AppStateIntegrationTest {
         assertTrue(File(path, "file.txt").exists())
     }
 
+    /**
+     * The bug this pins: picking a *remote* branch in "Check out existing branch" made a worktree
+     * with no branch at all. `git worktree add <path> origin/feature` resolves the ref, sees it is
+     * not a local branch, and checks the commit out **detached** — reporting success, so nothing
+     * said anything was wrong. What the user asked for is a local branch on it, and the dialog now
+     * sends that: `-b <short name>` on the remote ref.
+     *
+     * `--track` then has to be explicit. `-b` off a remote-tracking ref usually sets the upstream
+     * on its own, but only because `branch.autoSetupMerge` defaults to true — this repository turns
+     * it off, so the assertion is about the flag rather than about the default.
+     */
+    @Test
+    fun `a worktree made from a remote branch gets a local branch tracking it`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val git = Git(ProcessCommandRunner(), JvmFileSystemAccess(), gitPath)
+        val remote = File(root, "remote.git")
+        git.run(root.path, "init", "--quiet", "--bare", remote.path)
+        git.run(mainRepo.path, "config", "branch.autoSetupMerge", "false")
+        git.run(mainRepo.path, "remote", "add", "origin", remote.path)
+        git.run(mainRepo.path, "checkout", "--quiet", "-b", "feature/api")
+        File(mainRepo, "api.txt").writeText("api\n")
+        git.stageAll(mainRepo.path)
+        git.commit(mainRepo.path, "api")
+        git.run(mainRepo.path, "push", "--quiet", "origin", "main", "feature/api")
+        git.run(mainRepo.path, "checkout", "--quiet", "main")
+        // Only the remote-tracking ref survives, which is the case the dialog's list offers.
+        git.run(mainRepo.path, "branch", "-D", "feature/api")
+
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        assertTrue(
+            state.branches.any { it.isRemote && it.name == "origin/feature/api" },
+            "the remote branch is not in the picker: ${state.branches.map { it.name }}",
+        )
+
+        // What the dialog used to send, and why it was wrong: git creates the worktree and reports
+        // success, and the checkout has no branch.
+        val naive = File(root, "wt-detached").path
+        assertTrue(git.addWorktree(mainRepo.path, naive, existingBranch = "origin/feature/api").ok)
+        assertNull(
+            git.status(naive).branch,
+            "naming a remote branch as the one to check out no longer detaches — the fix can go",
+        )
+
+        // What it sends now: a local branch of the short name, on the remote ref, tracking it.
+        val path = File(root, "wt-api").path
+        state.createWorktree(
+            path = path,
+            newBranch = "feature/api",
+            existingBranch = null,
+            baseRef = "origin/feature/api",
+            force = false,
+            track = true,
+        ).join()
+
+        val canonical = File(path).canonicalPath
+        val created = state.worktrees.single { File(it.path).canonicalPath == canonical }
+        assertEquals("feature/api", created.branch, "the worktree is detached, not on a branch")
+        state.selectWorktree(created).join()
+        assertEquals("origin/feature/api", state.status.upstream)
+        assertTrue(File(path, "api.txt").exists())
+    }
+
     @Test
     fun `worktrees are ordered by their last commit, most recent first`() = runBlocking {
         if (!gitAvailable) return@runBlocking

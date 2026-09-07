@@ -237,6 +237,13 @@ class Git(
     /**
      * `git worktree add`. Exactly one of [newBranch] / [existingBranch] should be set; with neither,
      * git detaches at [baseRef].
+     *
+     * [track] sets the new branch's upstream to [baseRef], and is how a *remote* branch is checked
+     * out. Naming one as [existingBranch] does not do it: `git worktree add <path> origin/feature`
+     * resolves the ref, finds it is not a local branch and checks the commit out **detached** —
+     * reporting success, so the worktree is created and simply has no branch. That is what a user
+     * picking a remote branch from the dialog's list used to get. The command that means what they
+     * asked for is `--track -b feature <path> origin/feature`.
      */
     suspend fun addWorktree(
         dir: String,
@@ -246,9 +253,11 @@ class Git(
         baseRef: String? = null,
         force: Boolean = false,
         detach: Boolean = false,
+        track: Boolean = false,
     ): CommandResult {
         val args = mutableListOf("worktree", "add")
         if (force) args += "--force"
+        if (track) args += "--track"
         when {
             newBranch != null -> { args += "-b"; args += newBranch }
             detach -> args += "--detach"

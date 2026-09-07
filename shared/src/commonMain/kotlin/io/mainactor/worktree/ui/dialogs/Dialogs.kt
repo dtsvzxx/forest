@@ -177,6 +177,8 @@ data class NewWorktreeRequest(
     val existingBranch: String?,
     val baseRef: String?,
     val force: Boolean,
+    /** Set the new branch's upstream to [baseRef] — see `Git.addWorktree`. */
+    val track: Boolean = false,
 )
 
 @Composable
@@ -194,7 +196,9 @@ fun NewWorktreeDialog(
     var parent by remember { mutableStateOf(defaultParent) }
     var folder by remember { mutableStateOf("") }
     var base by remember { mutableStateOf(suggestedBase.orEmpty()) }
-    var existing by remember { mutableStateOf("") }
+    // The whole branch, not its name: only `isRemote` tells `origin/feature` — which has to be
+    // checked out as a new local branch tracking it — from a local branch of that same name.
+    var existing by remember { mutableStateOf<Branch?>(null) }
     var force by remember { mutableStateOf(false) }
 
     // A branch already checked out elsewhere cannot be checked out again — git refuses, so the
@@ -205,14 +209,16 @@ fun NewWorktreeDialog(
     val effectiveFolder = folder.ifBlank {
         when (mode) {
             BranchMode.NEW_BRANCH -> branchName.replace('/', '-')
-            BranchMode.EXISTING_BRANCH -> existing.substringAfterLast('/')
+            // The same flattening a new branch gets: `substringAfterLast` gave `feature/api` and
+            // `spike/api` the one folder `api`.
+            BranchMode.EXISTING_BRANCH -> existing?.shortName?.replace('/', '-').orEmpty()
             BranchMode.DETACHED -> base.take(12)
         }
     }
     val path = if (parent.isBlank() || effectiveFolder.isBlank()) "" else "$parent/$effectiveFolder"
     val valid = path.isNotBlank() && when (mode) {
         BranchMode.NEW_BRANCH -> branchName.isNotBlank()
-        BranchMode.EXISTING_BRANCH -> existing.isNotBlank()
+        BranchMode.EXISTING_BRANCH -> existing != null
         BranchMode.DETACHED -> base.isNotBlank()
     }
 
@@ -225,13 +231,20 @@ fun NewWorktreeDialog(
             IdeButton(
                 text = "Create",
                 onClick = {
+                    val chosen = existing.takeIf { mode == BranchMode.EXISTING_BRANCH }
+                    // A remote branch is not something git can check out. Asking for one means
+                    // "give me a local branch on it", which is `--track -b <short> … <remote ref>`.
+                    val remote = chosen?.takeIf { it.isRemote }
                     onConfirm(
                         NewWorktreeRequest(
                             path = path,
-                            newBranch = branchName.takeIf { mode == BranchMode.NEW_BRANCH },
-                            existingBranch = existing.takeIf { mode == BranchMode.EXISTING_BRANCH },
-                            baseRef = base.takeIf { it.isNotBlank() && mode != BranchMode.EXISTING_BRANCH },
+                            newBranch = branchName.takeIf { mode == BranchMode.NEW_BRANCH }
+                                ?: remote?.shortName,
+                            existingBranch = chosen?.takeUnless { it.isRemote }?.name,
+                            baseRef = remote?.name
+                                ?: base.takeIf { it.isNotBlank() && mode != BranchMode.EXISTING_BRANCH },
                             force = force,
+                            track = remote != null,
                         )
                     )
                 },
@@ -258,7 +271,7 @@ fun NewWorktreeDialog(
                     if (mode == BranchMode.EXISTING_BRANCH) {
                         BranchList(
                             branches = available,
-                            selected = existing,
+                            selected = existing?.name.orEmpty(),
                             onSelect = { existing = it },
                             modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
                         )
@@ -314,7 +327,9 @@ fun NewWorktreeDialog(
 private fun BranchList(
     branches: List<Branch>,
     selected: String,
-    onSelect: (String) -> Unit,
+    // The whole branch, not its name: a caller that has to check out the selection needs to know
+    // whether it is a remote one, which the name alone does not say.
+    onSelect: (Branch) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalWorktreeColors.current
@@ -341,7 +356,7 @@ private fun BranchList(
                 items(shown, key = { "${it.isRemote}:${it.name}" }) { branch ->
                     ListRow(
                         selected = branch.name == selected,
-                        onClick = { onSelect(branch.name) },
+                        onClick = { onSelect(branch) },
                         height = 22.dp,
                     ) {
                         IdeIcon(
@@ -501,7 +516,7 @@ fun SwitchBranchDialog(
             RadioRow("Switch to an existing branch", !createNew) { createNew = false }
             if (!createNew) {
                 Column(Modifier.padding(start = 20.dp)) {
-                    BranchList(branches = available, selected = selected, onSelect = { selected = it })
+                    BranchList(branches = available, selected = selected, onSelect = { selected = it.name })
                     if (takenElsewhere > 0) {
                         Text(
                             text = "$takenElsewhere branch(es) hidden — checked out in another worktree.",
@@ -781,7 +796,7 @@ fun MergeDialog(
                 color = colors.textDim,
                 style = MaterialTheme.typography.bodySmall,
             )
-            BranchList(branches = candidates, selected = selected, onSelect = { selected = it })
+            BranchList(branches = candidates, selected = selected, onSelect = { selected = it.name })
             CheckRow("Always create a merge commit (--no-ff)", noFastForward) { noFastForward = !noFastForward }
         }
     }
@@ -820,7 +835,7 @@ fun RebaseDialog(
                 color = colors.textDim,
                 style = MaterialTheme.typography.bodySmall,
             )
-            BranchList(branches = candidates, selected = selected, onSelect = { selected = it })
+            BranchList(branches = candidates, selected = selected, onSelect = { selected = it.name })
         }
     }
 }

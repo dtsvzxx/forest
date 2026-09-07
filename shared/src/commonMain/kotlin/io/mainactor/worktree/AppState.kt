@@ -909,6 +909,7 @@ class AppState(
         existingBranch: String?,
         baseRef: String?,
         force: Boolean,
+        track: Boolean = false,
     ) = run("Creating worktree") {
         val root = project?.path ?: return@run
         val result = git.addWorktree(
@@ -918,6 +919,7 @@ class AppState(
             existingBranch = existingBranch,
             baseRef = baseRef,
             force = force,
+            track = track,
         )
         if (!result.ok) {
             fail(result)
