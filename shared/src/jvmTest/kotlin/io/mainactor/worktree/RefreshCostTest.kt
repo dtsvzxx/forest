@@ -1,20 +1,26 @@
 package io.mainactor.worktree
 
 import io.mainactor.worktree.git.Git
+import io.mainactor.worktree.platform.CommandResult
+import io.mainactor.worktree.platform.CommandRunner
 import io.mainactor.worktree.platform.DesktopSystemIntegration
 import io.mainactor.worktree.platform.DirectoryChooser
 import io.mainactor.worktree.platform.GitLocator
 import io.mainactor.worktree.platform.JvmFileSystemAccess
 import io.mainactor.worktree.platform.JvmShellRunner
 import io.mainactor.worktree.platform.ProcessCommandRunner
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -62,11 +68,11 @@ class RefreshCostTest {
         root.deleteRecursively()
     }
 
-    private fun CoroutineScope.newState(): AppState {
+    private fun CoroutineScope.newState(runner: CommandRunner = ProcessCommandRunner()): AppState {
         val fs = JvmFileSystemAccess(home = homeDir.path)
         var sink: ((io.mainactor.worktree.git.GitLogEntry) -> Unit)? = null
         return AppState(
-            git = Git(ProcessCommandRunner(), fs, gitPath, onLog = { sink?.invoke(it) }),
+            git = Git(runner, fs, gitPath, onLog = { sink?.invoke(it) }),
             fs = fs,
             store = ProjectStore(fs),
             shell = JvmShellRunner(),
@@ -122,6 +128,41 @@ class RefreshCostTest {
                 "(budget $budget):\n" + commands.groupingBy { it.command.substringBefore(" -") }
                     .eachCount().entries.sortedByDescending { it.value }.joinToString("\n"),
         )
+    }
+
+    @Test
+    fun `a badge appears as it arrives, not when the last one lands`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        // The sweep is bounded by the disk, so on a real repository of sixty worktrees it takes
+        // seconds. Publishing the whole map at the end left the list blank for all of them; this
+        // holds one worktree's status open and checks the rest are already on screen.
+        val held = CompletableDeferred<Unit>()
+        val slow = File(root, "wt${WORKTREES - 1}").canonicalPath
+        val state = newState(
+            object : CommandRunner {
+                private val real = ProcessCommandRunner()
+                override suspend fun exec(
+                    workDir: String?,
+                    command: List<String>,
+                    stdin: String?,
+                    env: Map<String, String>,
+                ): CommandResult {
+                    if (workDir == slow && "status" in command) held.await()
+                    return real.exec(workDir, command, stdin, env)
+                }
+            }
+        )
+
+        state.openProject(mainRepo.path).join()
+        val sweep = state.badgeRefresh!!
+
+        // Everything but the one being held back.
+        withTimeout(30_000) { while (state.worktreeStatuses.size < WORKTREES) yield() }
+        assertFalse(sweep.isCompleted, "the sweep was over before the badges were checked")
+
+        held.complete(Unit)
+        sweep.join()
+        assertEquals(WORKTREES + 1, state.worktreeStatuses.size)
     }
 
     private companion object {

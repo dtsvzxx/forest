@@ -496,12 +496,22 @@ class AppState(
      * `GIT_OPTIONAL_LOCKS=0` keeps it from touching `index.lock`, so it cannot collide with a
      * command that writes the index. Only the newest sweep is kept — during a burst of actions the
      * earlier ones have nothing left to say.
+     *
+     * **Each badge is published the moment it arrives**, rather than the whole map when the last
+     * one lands. The sweep is bounded by the disk rather than by the processor — measured on a
+     * repository of 62 worktrees, one `git status` is ~110 ms and the whole sweep is 5.3 s however
+     * many run at once — so waiting for it means a list that shows nothing for five seconds after
+     * a project is opened, which is what it did. Publishing as they come fills the list from the
+     * top in the order it is drawn, and a sweep cancelled half way through keeps what it learnt.
      */
     private fun refreshBadges(root: String, list: List<Worktree>, commitTimes: Map<String, Long>) {
         badgeRefresh?.cancel()
         badgeRefresh = scope.launch {
-            val statuses = sweepStatuses(list)
+            val statuses = sweepStatuses(list) { path, status ->
+                if (project?.path == root) worktreeStatuses = worktreeStatuses + (path to status)
+            }
             if (project?.path != root) return@launch
+            // The whole map at the end, so a worktree that has since gone loses its badge with it.
             worktreeStatuses = statuses
 
             // Uncommitted edits can only be dated once we know which files they are in.
@@ -608,12 +618,29 @@ class AppState(
     /** git writes an all-zero HEAD for a branch that has no commits yet. */
     private fun isRealSha(sha: String) = sha.isNotBlank() && sha.any { it != '0' }
 
-    /** Summary status of every non-bare worktree, with a bounded number of gits in flight. */
-    private suspend fun sweepStatuses(list: List<Worktree>): Map<String, RepoStatus> {
+    /**
+     * Summary status of every non-bare worktree, with a bounded number of gits in flight.
+     *
+     * [onStatus] is called with each one as it lands, on the caller's dispatcher, so the list can
+     * fill in while the rest of the sweep is still running. The permits are handed out roughly in
+     * the order asked, and [list] is in the order the pane draws, so the badges the user is
+     * looking at are the ones that arrive first.
+     */
+    private suspend fun sweepStatuses(
+        list: List<Worktree>,
+        /** Nothing by default: a caller that hands the whole list over at once has no use for it. */
+        onStatus: (String, RepoStatus) -> Unit = { _, _ -> },
+    ): Map<String, RepoStatus> {
         val gate = Semaphore(MAX_PARALLEL_STATUS)
         return coroutineScope {
             list.filterNot { it.isBare }
-                .map { wt -> async { wt.path to gate.withPermit { git.status(wt.path, detailed = false) } } }
+                .map { wt ->
+                    async {
+                        val status = gate.withPermit { git.status(wt.path, detailed = false) }
+                        onStatus(wt.path, status)
+                        wt.path to status
+                    }
+                }
                 .awaitAll()
                 .toMap()
         }
@@ -1707,11 +1734,21 @@ class AppState(
     private companion object {
         const val MAX_LOG_ENTRIES = 500
 
-        /** Refreshing a repository with dozens of worktrees should not fork dozens of gits at once. */
         /** Enough matches to find what you meant; past this the list is scrolled, not read. */
         const val MAX_SEARCH_RESULTS = 300
 
-        const val MAX_PARALLEL_STATUS = 8
+        /**
+         * How many `git status` runs the badge sweep keeps in flight.
+         *
+         * The sweep is bounded by the disk, not the processor, so this trades the *first* badge
+         * against the last rather than buying throughput. Measured on a repository of 62 worktrees
+         * of 11 500 files each, over six runs in varying order: the whole sweep takes 5.3 s at 8,
+         * 5.5 s at 6 and 5.9 s at 4 — all within a few per cent — while the first badge lands at
+         * 450 ms, 290 ms and 230 ms, and the eighth (the last row a list is showing) at 1030 ms,
+         * 730 ms and 780 ms. Six is the corner: it fills the visible rows a third sooner and gives
+         * up nothing measurable at the end. Above 8 both halves get worse.
+         */
+        const val MAX_PARALLEL_STATUS = 6
 
         /** Past any file anybody opens in a pane, which is how `-U` is asked for "all of it". */
         const val WHOLE_FILE_CONTEXT = 1_000_000

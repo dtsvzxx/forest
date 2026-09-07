@@ -118,8 +118,26 @@ on the interactive path:
 - `loadWorktree` issues its independent reads concurrently.
 - Dating the worktree list is one command regardless of its length (see above).
 
-`RefreshCostTest` builds a 40-worktree repository and fails if either budget regresses. Before these
-constraints existed, one refresh spawned 249 child processes and took ~1.5 s.
+**The sweep publishes each badge as it lands, and that is the whole of what a big repository
+feels.** It used to assign the finished map in one go, so on a real repository of 62 worktrees the
+list showed no state at all for six seconds after the project was opened and then filled in at
+once. The sweep is bounded by the **disk**, not by the processor — one `git status` there is
+~110 ms warm and the whole sweep takes 5.3 s at 8 in flight, 5.5 s at 6 and 5.9 s at 4, so
+concurrency buys almost no throughput and only decides which badge is first. Both halves follow
+from that: statuses go into `worktreeStatuses` one at a time (the full map still replaces it at the
+end, so a worktree that has gone loses its badge with it), and `MAX_PARALLEL_STATUS` is 6 rather
+than 8 because that lands the first badge in 290 ms instead of 450 ms and the eighth — the last row
+a list is showing — in 730 ms instead of 1030 ms, for a few per cent on a total nobody is watching.
+Measured end to end against that repository: the list and the selected worktree at 409 ms, the
+first badge at 737 ms, all 62 by 5.8 s.
+
+The dominant cost is not the untracked walk: `git diff-index --quiet HEAD` alone, over all 62, is
+3.3 s of the 5.3 s. It is one `lstat` per tracked file per worktree — 700 000 of them — and no
+choice of git flags avoids it.
+
+`RefreshCostTest` builds a 40-worktree repository and fails if either budget regresses; `a badge
+appears as it arrives, not when the last one lands` holds one worktree's status open and checks the
+other 40 are already published, which the one-shot assignment could not do.
 
 **A commit's own diff** comes from `Git.commitDiff`, which is `git show --format= -m
 --first-parent`. The `-m --first-parent` pair is the whole point: without it git prints an *empty*
