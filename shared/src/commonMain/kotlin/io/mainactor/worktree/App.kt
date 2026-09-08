@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +36,8 @@ import io.mainactor.worktree.ui.components.IdeTab
 import io.mainactor.worktree.ui.components.ToolButton
 import io.mainactor.worktree.ui.components.VerticalDivider
 import io.mainactor.worktree.ui.components.VerticalSplitter
+import io.mainactor.worktree.ui.components.pane
+import io.mainactor.worktree.ui.theme.Dimens
 import io.mainactor.worktree.ui.dialogs.CloneDialog
 import io.mainactor.worktree.ui.dialogs.CommitDialog
 import io.mainactor.worktree.ui.dialogs.MergeDialog
@@ -111,14 +114,13 @@ fun App(
             state.taskRequest?.let { sessionId -> dialog = Dialog.SendTask(sessionId) }
         }
 
-        Column(Modifier.fillMaxSize().background(colors.editor)) {
+        Column(Modifier.fillMaxSize().background(colors.frame)) {
             MainToolbar(
                 state = state,
                 onCommit = { dialog = Dialog.Commit },
                 onMerge = { dialog = Dialog.Merge },
                 onRebase = { dialog = Dialog.Rebase },
             )
-            HorizontalDivider()
 
             if (state.mode == AppMode.AGENTS) {
                 // The wall takes the whole content area: the panes are what you are working in.
@@ -127,9 +129,8 @@ fun App(
                     terminal = terminal,
                     suspended = dialog != null,
                     onAddAgent = { state.requestNewAgent() },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(Dimens.paneGap).pane(),
                 )
-                HorizontalDivider()
                 StatusBar(state)
                 // No Dialogs() here: `return@Column` leaves the column, not the theme block, so
                 // the call below still runs and a second copy of the modal would stack on top.
@@ -137,9 +138,14 @@ fun App(
             }
 
             Column(
-                modifier = Modifier.weight(1f).onSizeChanged {
-                    contentSize = with(density) { DpSize(it.width.toDp(), it.height.toDp()) }
-                },
+                modifier = Modifier
+                    .weight(1f)
+                    // The frame shows down both sides of the content; the toolbar above and the
+                    // status bar below already are the frame, so only the sides are inset here.
+                    .padding(Dimens.paneGap)
+                    .onSizeChanged {
+                        contentSize = with(density) { DpSize(it.width.toDp(), it.height.toDp()) }
+                    },
             ) {
                 // Shrinking the window must not push the flexible panes out of existence, but it
                 // must not forget the sizes either: the stored values are squeezed for layout and
@@ -162,7 +168,7 @@ fun App(
                         state = state,
                         onClone = { dialog = Dialog.Clone },
                         onConfigureAgents = { dialog = Dialog.AgentSettings },
-                        modifier = Modifier.width(projectsWidth * squeeze),
+                        modifier = Modifier.width(projectsWidth * squeeze).pane(),
                     )
                     VerticalSplitter(
                         size = projectsWidth,
@@ -176,7 +182,7 @@ fun App(
                         onRemove = { dialog = Dialog.RemoveWorktree(it) },
                         onSwitchBranch = { dialog = Dialog.SwitchBranch(it) },
                         onRename = { dialog = Dialog.RenameWorktree(it) },
-                        modifier = Modifier.width(worktreesWidth * squeeze),
+                        modifier = Modifier.width(worktreesWidth * squeeze).pane(),
                     )
                     VerticalSplitter(
                         size = worktreesWidth,
@@ -188,7 +194,7 @@ fun App(
                     RightPane(
                         state = state,
                         onCommit = { dialog = Dialog.Commit },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).pane(),
                     )
                 }
 
@@ -206,12 +212,11 @@ fun App(
                         // A modal must not be painted under the terminal: on desktop the terminal
                         // is a heavyweight Swing component, so it is detached while a dialog is up.
                         suspended = dialog != null,
-                        modifier = Modifier.fillMaxWidth().height(shownTerminalHeight),
+                        modifier = Modifier.fillMaxWidth().height(shownTerminalHeight).pane(),
                     )
                 }
             }
 
-            HorizontalDivider()
             StatusBar(state)
         }
 

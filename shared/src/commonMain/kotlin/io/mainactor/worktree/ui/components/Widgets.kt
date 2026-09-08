@@ -238,10 +238,25 @@ fun ToolWindowHeader(
 typealias RowScopeActions = @Composable () -> Unit
 
 /** The 1px rules the IDE uses between panes and headers. */
+/**
+ * Makes a top-level region one of the window's rounded panes.
+ *
+ * The whole of the new look is here and in `WorktreeColors.frame`: a pane is a card of Gray1
+ * floating on a Gray2 window, with the frame showing through the gaps rather than a rule drawn
+ * between them. Only the regions the window itself lays out take this — the three columns, the
+ * terminal tool window, the agent wall. Anything inside one is on a single surface and divides
+ * itself with `separator`.
+ *
+ * A clip and nothing else: the pane already paints its own background, and clipping is what bends
+ * that paint round the corner. A border would have to let the frame show *through* the rounding,
+ * which a rectangle drawn on top cannot do.
+ */
+fun Modifier.pane(): Modifier = clip(RoundedCornerShape(Dimens.paneArc))
+
 @Composable
 fun HorizontalDivider(
     modifier: Modifier = Modifier,
-    color: Color = LocalWorktreeColors.current.border,
+    color: Color = LocalWorktreeColors.current.separator,
 ) {
     Box(modifier.fillMaxWidth().height(1.dp).background(color))
 }
@@ -249,7 +264,7 @@ fun HorizontalDivider(
 @Composable
 fun VerticalDivider(
     modifier: Modifier = Modifier,
-    color: Color = LocalWorktreeColors.current.border,
+    color: Color = LocalWorktreeColors.current.separator,
 ) {
     Box(modifier.fillMaxHeight().width(1.dp).background(color))
 }
@@ -371,7 +386,7 @@ fun VerticalSplitter(
     min: Dp = 140.dp,
     max: Dp = 640.dp,
     sizesTrailingPane: Boolean = false,
-    color: Color = LocalWorktreeColors.current.border,
+    color: Color = Color.Transparent,
 ) = Splitter(true, size, onSizeChange, modifier, min, max, sizesTrailingPane, color)
 
 @Composable
@@ -382,7 +397,7 @@ fun HorizontalSplitter(
     min: Dp = 80.dp,
     max: Dp = 720.dp,
     sizesTrailingPane: Boolean = false,
-    color: Color = LocalWorktreeColors.current.border,
+    color: Color = Color.Transparent,
 ) = Splitter(false, size, onSizeChange, modifier, min, max, sizesTrailingPane, color)
 
 /**
@@ -452,7 +467,10 @@ fun ProportionalSplitter(
                         Modifier.fillMaxWidth().height(1.dp)
                     }
                 )
-                .background(if (active) colors.accent else colors.border),
+                // Nothing at rest: the wall's panes carry rounded borders of their own, and a
+                // third line between two of them is one line too many. It appears under the
+                // pointer, which is the only moment a splitter has to be visible.
+                .background(if (active) colors.accent else Color.Transparent),
         )
     }
 }
@@ -472,10 +490,12 @@ private fun Splitter(
     /** True when the sized pane sits *after* the divider, so dragging back towards it grows it. */
     sizesTrailingPane: Boolean,
     /**
-     * The line's colour at rest.
+     * The line's colour at rest, transparent by default.
      *
-     * `border` is Gray1 — the *same* value as `editor` — so a divider drawn with it between two
-     * editor-coloured regions is painted and invisible. Panes on that surface pass `separator`.
+     * Between two panes there is nothing to draw: the strip *is* the gap, and the frame behind it
+     * is what separates them. A splitter *inside* one pane — the Log tab's, the Search tab's, the
+     * changes list over its diff — passes `separator`, because there the two halves are one
+     * surface and a rule is the only thing saying where one ends.
      */
     color: Color,
 ) {

@@ -94,6 +94,7 @@ fun ChangesPane(
             }
         }
         HorizontalSplitter(
+            color = colors.separator,
             size = fileListHeight,
             onSizeChange = { fileListHeight = it },
             min = 70.dp,

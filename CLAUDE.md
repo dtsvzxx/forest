@@ -250,6 +250,35 @@ they run — at 14dp an icon does not say what `git worktree prune` will do, and
 "nothing is hidden" promise is worth applying to the buttons too. `Tooltip` wraps Compose Desktop's
 `TooltipArea`; `AppRenderTest` drives a real hover to prove one actually appears.
 
+**Panes are rounded cards on a lighter frame, and which way round the two greys go is the whole
+look.** `frame` (Gray2, `MainToolbar.background`) is the window — the toolbar, the status bar and
+every gap between panes — and a pane is Gray1 (`EditorTabs.background`), so the tool windows and the
+editor share one surface and float on it. Forest had it the other way round, Gray2 panes over a
+Gray1 window, which is the older flat look where a pane is a *lighter* region with a 1px rule beside
+it. Both values were read twice: out of `expUI_dark.theme.json` (in
+`Android Studio.app/Contents/lib/intellij.platform.ide.impl.jar`, under `themes/expUI/`) and back
+off a screenshot of the IDE, where a row of pixels across the window reads Gray2 in the gaps and
+Gray1 either side of them. The radius came the same way — `Component.arc` is 8, and the corner
+measured off that screenshot is 8dp once its 1.25 scale is divided out.
+
+Three things follow, and the second is the one that catches people:
+
+- `Modifier.pane()` is a **clip and nothing else**. The pane already paints its own background, and
+  clipping bends that paint round the corner; a border drawn on top could not let the frame show
+  *through* the rounding.
+- **A splitter between two panes draws nothing at rest.** The strip *is* the gap — `Dimens.paneGap`,
+  the same 7dp as `splitterThickness`, because a 4dp gap (which is what the IDE has) is not a grab
+  target. Only a splitter *inside* one pane passes `separator`, and the wall's `ProportionalSplitter`
+  draws nothing either, its panes having borders of their own.
+- `HorizontalDivider`/`VerticalDivider` default to **`separator`**, not `border`. On Gray1 panes
+  `border` is the same value as the surface, so the old default was painted and invisible
+  everywhere rather than only in the two panes that had noticed.
+
+`a pane is a rounded card with the frame showing through its corner` reads the corner pixel
+directly. Every other render test passes just as happily on square panes butted together, which is
+what made it worth writing: it finds the pane's edges by scanning and then asserts the corner is
+frame while both edges are not.
+
 **The palette is sourced, not invented.** Chrome comes from JetBrains' New UI theme
 (`expUI_dark.theme.json`: the `Gray1…Gray14` / `Blue*` ramps, `Component.arc` = 8,
 `EditorTabs.underlineHeight` = 4, `List.rowHeight` = 24); VCS and diff colours come from the editor
@@ -276,11 +305,11 @@ and friends) while leaving the stored value alone, so the panes come back when t
 
 Layout traps that have already bitten this code:
 
-- **`border` is Gray1 — the same value as `editor`.** That is faithful to the New UI, where a
-  border is *darker* than the panel it edges, but it means a `HorizontalDivider`/`Splitter` drawn
-  between two editor-coloured regions is painted and invisible. Panes on that surface (Log, Search)
-  pass `separator` (Gray3) instead. `AppRenderTest` scans a column of the rendered Search tab for
-  rows of that exact colour, so the line has to be visible and not merely present.
+- **`border` is Gray1 — the same value as `editor`, and now as `panel` too.** It is what the New
+  UI calls a border, *darker* than what it edges, and it is why a divider drawn with it is painted
+  and invisible. That trap is closed rather than documented: the dividers default to `separator`
+  (Gray3). `AppRenderTest` scans a column of the rendered Search tab for rows of that exact colour,
+  so the line has to be visible and not merely present.
 - **A column of text sized by a guessed `dp` width will eventually wrap.** The Log tab's hash
   column was 62.dp against an eight-character monospace hash, which fitted in theory and wrapped in
   practice; the second line was then clipped by the row height. Where a column is monospace and

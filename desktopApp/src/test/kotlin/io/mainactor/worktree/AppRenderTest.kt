@@ -432,6 +432,42 @@ class AppRenderTest {
     }
 
     @Test
+    fun `a pane is a rounded card with the frame showing through its corner`() {
+        // The whole of the look this copies: a pane is a card of Gray1 floating on the Gray2
+        // window, and the corner is cut away so the frame shows through it. Every other test here
+        // passes just as happily on square panes butted against each other, which is what this had
+        // before — so the corner is read directly, at the one place a radius is visible.
+        val state = fakeState(worktrees = 2)
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { _, _, m -> Box(m.fillMaxSize().background(Color(0xFF1E1F22))) })
+        }
+        try {
+            scene.render()
+            val image = scene.render()
+            val pixels = image.peekPixels()!!
+            val bytes = pixels.buffer.bytes
+            val rowBytes = pixels.rowBytes
+            fun frameAt(x: Int, y: Int) = isFrame(bytes, y * rowBytes + x * 4)
+
+            // The projects pane, found rather than assumed: its left edge on a row of plain list,
+            // and its bottom edge in a column just inside that.
+            val left = (0 until WIDTH).first { !frameAt(it, 300) }
+            val bottom = (HEIGHT - 1 downTo 300).first { !frameAt(left + 4, it) }
+            val arc = 8
+
+            assertTrue(
+                frameAt(left, bottom),
+                "the pane's bottom-left corner is square: the frame does not show through it",
+            )
+            // And it is only the corner that is cut — a pane rounded into oblivion is not this.
+            assertTrue(!frameAt(left + arc, bottom), "the bottom edge is missing $arc px in")
+            assertTrue(!frameAt(left, bottom - arc), "the left edge is missing $arc px up")
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun `a bigger window grows only the changes pane and nothing else`() {
         // Two windows, same starting state. The side panes and the terminal are sized absolutely,
         // so their dividers must land in the same place regardless of how big the window is; only
@@ -466,7 +502,8 @@ class AppRenderTest {
             scene.render()
             val image = scene.render()
             val first = splitterX(image)
-            val second = splitterX(image, from = first + 4)
+            // Past the whole band, not one pixel into it, or the same gap answers twice.
+            val second = splitterX(image, from = first + 12)
             PaneMetrics(
                 firstDividerX = first,
                 bottomBandHeight = height - panesBottomY(image, height),
@@ -545,10 +582,12 @@ class AppRenderTest {
     }
 
     /**
-     * Y of the horizontal divider under the panes, i.e. the top of the terminal tool window.
+     * Y of the gap under the panes, i.e. the top of the terminal tool window.
      *
-     * Scans below the project rows, and requires the darkness to persist for a few pixels — the
-     * tool-window header is separated by a one-pixel rule of the very same colour.
+     * Scans below the project rows for the frame showing between two panes. That gap used to be a
+     * one-pixel rule *darker* than the panels; in the rounded look the panes are the dark ones and
+     * the gap is the lighter window behind them, so this reads for [FRAME] rather than against it.
+     * It still insists the colour persists, since a stray light pixel is any number of things.
      */
     private fun panesBottomY(image: org.jetbrains.skia.Image): Int = panesBottomY(image, image.height)
 
@@ -557,34 +596,30 @@ class AppRenderTest {
         val bytes = pixels.buffer.bytes
         val rowBytes = pixels.rowBytes
         val col = 100
-        fun isDark(row: Int): Boolean {
-            val i = row * rowBytes + col * 4
-            return (bytes[i].toInt() and 0xFF) <= 0x24 && (bytes[i + 1].toInt() and 0xFF) <= 0x25
-        }
+        fun isFrame(row: Int) = isFrame(bytes, row * rowBytes + col * 4)
         for (row in 250 until height - 60) {
-            if (isDark(row) && isDark(row + 2) && isDark(row + 4)) return row
+            if (isFrame(row) && isFrame(row + 2) && isFrame(row + 4)) return row
         }
         error("no terminal boundary found")
     }
 
-    /**
-     * X of the first pane divider: a one-pixel column of the border colour between two panels.
-     */
+    /** X where the gap between two panes starts: a band of the frame, [Dimens.paneGap] wide. */
     private fun splitterX(image: org.jetbrains.skia.Image, from: Int = 60): Int {
         val pixels = image.peekPixels()!!
         val bytes = pixels.buffer.bytes
         val rowBytes = pixels.rowBytes
         val row = 300
         for (col in from until image.width) {
-            val i = row * rowBytes + col * 4
-            val r = bytes[i].toInt() and 0xFF
-            val g = bytes[i + 1].toInt() and 0xFF
-            val b = bytes[i + 2].toInt() and 0xFF
-            // Border is #1E1F22; the panels either side are #2B2D30.
-            if (r <= 0x22 && g <= 0x23 && b <= 0x26) return col
+            if (isFrame(bytes, row * rowBytes + col * 4)) return col
         }
-        error("no divider found in the rendered window")
+        error("no gap found in the rendered window")
     }
+
+    /** `WorktreeColors.frame` (Gray2 #2B2D30) rather than a pane's Gray1, at a pixel's offset. */
+    private fun isFrame(bytes: ByteArray, at: Int): Boolean =
+        (bytes[at].toInt() and 0xFF) >= 0x28 &&
+            (bytes[at + 1].toInt() and 0xFF) >= 0x2A &&
+            (bytes[at + 2].toInt() and 0xFF) >= 0x2D
 
     @Test
     fun `right-clicking a project opens its context menu`() {
@@ -1117,13 +1152,17 @@ class AppRenderTest {
         /** Middle of a single pane's header: the wall starts under two toolbars, then 2dp of inset. */
         const val PANE_HEADER_Y = 87f
 
+        /** `Dimens.paneGap`: the frame between the window's edge and a pane. */
+        const val PANE_GAP = 7f
+
         /**
          * Centre of the task button on a full-width pane header.
          *
-         * The buttons are 20dp wide, 6dp apart, and the row ends 2dp from the window's edge, so
-         * they count back from there: close, zoom, split down, split right, go to worktree, task.
+         * The buttons are 20dp wide, 6dp apart, and the row ends 2dp from the pane's edge, so they
+         * count back from there: close, zoom, split down, split right, go to worktree, task. The
+         * pane's edge is no longer the window's — the wall is a rounded card inset by the frame.
          */
-        const val TASK_BUTTON_X = WIDTH - 2f - 10f - 5 * 26f
+        const val TASK_BUTTON_X = WIDTH - PANE_GAP - 2f - 10f - 5 * 26f
 
         /** `WorktreeColors.separator` — Gray3, the one divider colour visible on the editor. */
         const val SEPARATOR = 0x393B40

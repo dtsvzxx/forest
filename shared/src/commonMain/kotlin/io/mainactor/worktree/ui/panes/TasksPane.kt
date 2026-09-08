@@ -72,7 +72,13 @@ fun TasksPane(state: AppState, modifier: Modifier = Modifier) {
 
         Row(Modifier.fillMaxSize()) {
             TaskList(state, Modifier.width(TASK_LIST_WIDTH).fillMaxHeight())
-            VerticalSplitter(size = TASK_LIST_WIDTH, onSizeChange = {}, min = TASK_LIST_WIDTH, max = TASK_LIST_WIDTH)
+            VerticalSplitter(
+                size = TASK_LIST_WIDTH,
+                onSizeChange = {},
+                min = TASK_LIST_WIDTH,
+                max = TASK_LIST_WIDTH,
+                color = colors.separator,
+            )
             Box(Modifier.weight(1f).fillMaxHeight().background(colors.editor)) {
                 if (selected == null) {
                     EmptyState("Select a task.")

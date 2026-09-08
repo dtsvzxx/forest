@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 @Immutable
 data class WorktreeColors(
     // Surfaces
+    val frame: Color,
     val panel: Color,
     val panelAlt: Color,
     val editor: Color,
@@ -94,18 +95,26 @@ data class WorktreeColors(
 )
 
 /**
- * The IntelliJ / Android Studio **New UI** dark theme.
+ * The IntelliJ / Android Studio **New UI** dark theme, in its rounded-pane form.
  *
- * Compared with classic Darcula this is a colder, lower-contrast shell: panels sit above a nearly
- * black editor, borders are *darker* than the surfaces they separate rather than lighter, and the
- * accent moved to a considerably brighter blue.
+ * Compared with classic Darcula this is a colder, lower-contrast shell, and the accent moved to a
+ * considerably brighter blue. The part that decides the whole look is which way round the two
+ * greys go: **the frame is the lighter one**. Gray2 is the window — the toolbar, the status bar
+ * and every gap between panes — and Gray1 is what a pane is made of, so tool windows and the
+ * editor share one surface and float on the frame as rounded cards. `MainToolbar.background` is
+ * Gray2 and `EditorTabs.background` is Gray1, and a screenshot of the IDE reads the same two
+ * values in the same places.
+ *
+ * Forest had them the other way round — Gray2 panes over a Gray1 window — which is the older
+ * flat look, where a pane is a lighter region and a 1px rule divides it from the next.
  */
 val NewUiDarkColors = WorktreeColors(
-    panel = Color(0xFF2B2D30),          // Gray2  — tool windows, toolbar, status bar
+    frame = Color(0xFF2B2D30),          // Gray2  — MainToolbar.background: the window behind the panes
+    panel = Color(0xFF1E1F22),          // Gray1  — EditorTabs.background: a pane is the editor's surface
     panelAlt = Color(0xFF393B40),       // Gray3  — chips, popups, secondary surfaces
     editor = Color(0xFF1E1F22),         // Gray1  — editor, diff, terminal
-    toolbar = Color(0xFF2B2D30),
-    statusBar = Color(0xFF2B2D30),
+    toolbar = Color(0xFF2B2D30),        // Gray2  — part of the frame, not a pane
+    statusBar = Color(0xFF2B2D30),      // Gray2
     border = Color(0xFF1E1F22),         // Gray1  — *.borderColor: darker than the panel
     separator = Color(0xFF393B40),      // Gray3
     controlBorder = Color(0xFF4E5157),  // Gray5  — Component.borderColor / Button.startBorderColor
@@ -169,11 +178,30 @@ object Dimens {
     val tabHeight = 34.dp
     val iconButton = 26.dp
     val gutterWidth = 54.dp
-    /** Wider than the 1dp rule it draws: the whole strip is the grab target. */
-    val splitterThickness = 7.dp
+
+    /**
+     * The frame showing between two panes, and around them at the window's edge.
+     *
+     * The same value as [splitterThickness] because between two panes the gap **is** the splitter:
+     * it draws no line at rest and the frame behind it shows through. Measured off the IDE this
+     * copies, that gap is 4dp; the extra three are the grab target, which a 4dp strip does not
+     * make.
+     */
+    val paneGap = 7.dp
+
+    /** The gap doubles as the grab target: the whole strip takes the drag, not the line in it. */
+    val splitterThickness = paneGap
 
     /** `Component.arc` / `Button.arc`. */
     val arc = 8.dp
+
+    /**
+     * A pane's corner radius.
+     *
+     * `Component.arc`, which is what the IDE rounds its own tool windows by — measured back off a
+     * screenshot of it as ~8dp, which is the same number arriving from the other direction.
+     */
+    val paneArc = arc
 
     /** Rounded selection in lists and trees, and how far it is inset from the pane edges. */
     val selectionArc = 8.dp
