@@ -804,7 +804,25 @@ ID`, as is the app inside it.
 Two steps in that chain exist because the first submission came back **Invalid**, and both are easy
 to leave out:
 
-- **`hardenEmbeddedNatives`.** Notarization looks *inside* jars. The Compose plugin signs the native
+- **`hardenEmbeddedNatives`, which does two repairs rather than one** — the name is narrower than
+  the job, and they share a step, since both edit sealed resources and the seals then have to be
+  rewritten innermost first.
+
+  The second one is **jlink's licence symlinks**. `legal/java.desktop/LICENSE` and twenty-six like
+  it are links to `../java.base/LICENSE`, and **jpackage's DMG step copies the app image by
+  following them** — so the image holds twenty-seven regular files where the runtime's seal recorded
+  twenty-seven links, and the copy inside it fails `codesign --verify --deep --strict` with "file
+  modified" for each. Apple reports that as "The signature of the binary is invalid" against
+  `Contents/MacOS/Forest` and `runtime/Contents/MacOS/libjli.dylib`, naming the bundles whose seals
+  broke rather than the files that broke them; it cost a submission to find. This is jpackage's copy
+  and not the image format, which was established rather than assumed: `cp -R` and `hdiutil create
+  -srcfolder` both keep the links, and every JDK 25 on this machine loses them. The script resolves
+  them before anything is signed, so the runtime seals real files and jpackage's flattening becomes
+  a copy of what is already there. It also re-signs `Contents/runtime` — a bundle with a seal of its
+  own, whose cdhash the app's seal records — keeping the signature jpackage gave it: its own
+  identifier, read back off the bundle, a hardened runtime, and no entitlements.
+
+  The first one is buried Mach-O. Notarization looks *inside* jars. The Compose plugin signs the native
   libraries it finds there by extension, and pty4j ships an executable with no extension —
   `resources/com/pty4j/native/darwin/pty4j-unix-spawn-helper`, signed by JetBrains with
   `flags=0x0(none)`. It passes `codesign --verify --deep --strict` and Apple rejects it with "The
