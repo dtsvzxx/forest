@@ -138,6 +138,7 @@ class AppState(
     /** Colours the diff. Injected like every other platform thing; absent in a render test. */
     val highlighter: SyntaxHighlighter = SyntaxHighlighter.None,
     private val taskStore: TaskStore = TaskStore(fs),
+    private val statusStore: StatusStore = StatusStore(fs),
     /**
      * Hands a prompt to a running pane.
      *
@@ -392,7 +393,10 @@ class AppState(
         }
         // A sweep still running for the previous repository has nothing useful left to say.
         badgeRefresh?.cancel()
-        worktreeStatuses = emptyMap()
+        // What the last sweep of *this* repository found, so the badges and the order are on
+        // screen before the new sweep has run a single command. It is replaced wholesale when
+        // that sweep lands; until then it is the truth as of the last time the project was open.
+        worktreeStatuses = statusStore.load(root)
         projects = store.add(projects, root)
         store.setLastOpened(root)
         projectAgents = agentStore.forProjectOrDefault(root)
@@ -419,6 +423,7 @@ class AppState(
 
     fun forgetProject(path: String) {
         projects = store.remove(projects, path)
+        statusStore.forget(path)
         if (project?.path == path) closeProject()
     }
 
@@ -513,6 +518,10 @@ class AppState(
             if (project?.path != root) return@launch
             // The whole map at the end, so a worktree that has since gone loses its badge with it.
             worktreeStatuses = statuses
+            // Only a *finished* sweep is written: a cancelled one is a partial picture of the
+            // repository, and remembering it would put half of the last state beside half of the
+            // one before it the next time the project opens.
+            statusStore.save(root, statuses)
 
             // Uncommitted edits can only be dated once we know which files they are in.
             val refined = withActivity(list, commitTimes, statuses)

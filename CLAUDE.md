@@ -135,9 +135,33 @@ The dominant cost is not the untracked walk: `git diff-index --quiet HEAD` alone
 3.3 s of the 5.3 s. It is one `lstat` per tracked file per worktree — 700 000 of them — and no
 choice of git flags avoids it.
 
+**The last sweep is remembered, so the second opening of a project draws instantly**
+(`StatusStore`, `~/.worktree/status.json`). Publishing each badge as it lands took the *first* one
+down to 737 ms and could not do better, because the sweep is bounded by the disk; drawing what the
+sweep found last time takes it to nothing. Measured on the same 62-worktree repository: a cold open
+completes its badges at 6.9 s, a warm one has **all 62 on screen at 453 ms** — as soon as the window
+has the list at all — and the sweep still runs behind it, finishing at 5.6 s and correcting whatever
+moved. The file is 12 KB.
+
+Three things about it are deliberate:
+
+- **A cached badge is a claim about the past, and that is the trade.** It is right almost always,
+  since a checkout nobody has touched has not changed, and wrong for as long as the sweep takes when
+  somebody edited it from a terminal meanwhile. What is on offer is not a correct badge but five
+  seconds of *no* badge, and nothing destructive reads these numbers.
+- **The changed files are cached, not only the counts.** `withActivity` dates a worktree by the
+  newest mtime among them, so without them the list opens in commit-date order and re-sorts when the
+  sweep lands — the same jump this is meant to remove. The branch, head and in-progress operation
+  are deliberately *not* stored: the row reads those off the `Worktree`, and a stale branch would be
+  a different kind of wrong.
+- **Only a finished sweep is written.** A cancelled one is a partial picture, and remembering it
+  would put half of one state beside half of another on the next open.
+
 `RefreshCostTest` builds a 40-worktree repository and fails if either budget regresses; `a badge
 appears as it arrives, not when the last one lands` holds one worktree's status open and checks the
-other 40 are already published, which the one-shot assignment could not do.
+other 40 are already published, which the one-shot assignment could not do; and `a second opening
+draws the badges before the sweep has run a command` holds the *whole* sweep open, which is the
+stronger claim — not sooner, but without waiting for git at all.
 
 **A commit's own diff** comes from `Git.commitDiff`, which is `git show --format= -m
 --first-parent`. The `-m --first-parent` pair is the whole point: without it git prints an *empty*
@@ -179,7 +203,9 @@ Field separators: `GitParsers.FS` (`U+001F`, used in `--format` strings) and `Gi
 Never put these characters in a source file literally.
 
 **Persisted state** lives in `~/.worktree/`: `recent` is the project list in the order the user
-added them, and `last` is the project to reopen on startup. The list is deliberately never reordered
+added them, `last` is the project to reopen on startup, and `status.json` is the badge cache above —
+the only one of them that is a cache rather than a preference, and so the only one that may be
+deleted without losing anything. The list is deliberately never reordered
 by use — entries that move under the pointer are harder to navigate — so "most recent" is tracked in
 its own file rather than encoded in the ordering.
 

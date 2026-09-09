@@ -165,6 +165,50 @@ class RefreshCostTest {
         assertEquals(WORKTREES + 1, state.worktreeStatuses.size)
     }
 
+    @Test
+    fun `a second opening draws the badges before the sweep has run a command`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        // The sweep cannot be made fast — it is one lstat per tracked file per worktree — so the
+        // only way the list is populated at once is to draw what the last sweep found. Here the
+        // whole sweep is held open, which is the strongest form of the claim: not "sooner" but
+        // "without waiting for git at all".
+        newState().let { first ->
+            first.openProject(mainRepo.path).join()
+            first.badgeRefresh?.join()
+            assertEquals(WORKTREES + 1, first.worktreeStatuses.size, "nothing was there to remember")
+        }
+
+        val held = CompletableDeferred<Unit>()
+        val state = newState(
+            object : CommandRunner {
+                private val real = ProcessCommandRunner()
+                override suspend fun exec(
+                    workDir: String?,
+                    command: List<String>,
+                    stdin: String?,
+                    env: Map<String, String>,
+                ): CommandResult {
+                    // Only the sweep's summary form is held. The selected worktree's own status is
+                    // the detailed one, and blocking that would hang the opening this is timing.
+                    if ("--untracked-files=normal" in command) held.await()
+                    return real.exec(workDir, command, stdin, env)
+                }
+            }
+        )
+
+        state.openProject(mainRepo.path).join()
+
+        assertEquals(
+            WORKTREES + 1,
+            state.worktreeStatuses.size,
+            "the badges waited for a sweep that has not run",
+        )
+        assertFalse(state.badgeRefresh!!.isCompleted, "the sweep finished, so this proved nothing")
+
+        held.complete(Unit)
+        state.badgeRefresh?.join()
+    }
+
     private companion object {
         const val WORKTREES = 40
 
