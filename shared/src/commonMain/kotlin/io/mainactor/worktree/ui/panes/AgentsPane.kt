@@ -475,6 +475,7 @@ private fun AgentsToolbar(state: AppState, onAddAgent: () -> Unit) {
             // repositories "a terminal" is not enough to know where the command would run.
             tooltip = state.focusedAgentSession?.let { "Terminal in ${it.label} — hides without stopping" }
                 ?: "Terminal",
+            detail = AgentShortcuts.terminal,
             onClick = state::toggleTerminal,
             enabled = hasPanes,
         )

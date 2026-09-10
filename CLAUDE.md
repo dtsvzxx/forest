@@ -398,6 +398,17 @@ their own tests; `AppState` holds the root and derives `agents` from it. Both us
 `closeAgent`, removing the worktree, or closing the project do, all of them through
 `onTerminalDisposed`.
 
+**The terminal's chord is the exception to every rule the others follow.** ⌥F12 / Alt+F12 is the
+same on both platforms, because the reason the rest diverge — a bare `Ctrl` combination belongs to
+the shell on Linux and Windows — does not apply to a function key with `Alt`; and it is *taken*
+rather than chosen, being what the IDE this app is styled after opens its terminal with. It is also
+gated separately (`terminalEnabled`), since a terminal is offered on both screens while splitting
+and closing panes only mean something on the wall. Its one cost is macOS-only: with the factory
+setting where F11/F12 are volume keys it adjusts the volume instead, which is equally true of
+Android Studio, and the toolbar button beside the tooltip still works. `AgentKeyBindings.handle` is
+public for the test — AWT's focus manager will not dispatch to a component that is not showing,
+which is every component in a test, so going through it would only ever prove nothing happened.
+
 Shortcuts are registered as a global AWT `KeyEventDispatcher` (`terminal/AgentKeyBindings.kt`), not
 through Compose. A pane is a heavyweight Swing terminal that owns the keyboard focus, so Compose
 never sees the chord — only a hook that runs before AWT's own dispatch can claim it. The chords

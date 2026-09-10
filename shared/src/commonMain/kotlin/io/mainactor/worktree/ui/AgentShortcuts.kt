@@ -18,6 +18,8 @@ object AgentShortcuts {
         private set
     var zoomPane: String = ""
         private set
+    var terminal: String = ""
+        private set
 
     fun describe(
         splitRight: String,
@@ -25,11 +27,13 @@ object AgentShortcuts {
         newAgent: String,
         closePane: String,
         zoomPane: String,
+        terminal: String,
     ) {
         this.splitRight = splitRight
         this.splitDown = splitDown
         this.newAgent = newAgent
         this.closePane = closePane
         this.zoomPane = zoomPane
+        this.terminal = terminal
     }
 }

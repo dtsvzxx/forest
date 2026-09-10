@@ -157,6 +157,7 @@ fun MainToolbar(
                 state.terminalVisible -> "Hide the terminal — running shells keep going"
                 else -> "Show the terminal, opening a shell in the selected worktree if none is"
             },
+            detail = AgentShortcuts.terminal,
             onClick = state::toggleTerminal,
             enabled = hasWorktree && state.mode == AppMode.PROJECT,
         )

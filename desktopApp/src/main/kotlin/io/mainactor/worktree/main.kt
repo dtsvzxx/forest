@@ -62,6 +62,7 @@ fun main() {
         newAgent = bindings.newAgent.label,
         closePane = bindings.closePane.label,
         zoomPane = bindings.zoomPane.label,
+        terminal = bindings.terminal.label,
     )
 
     application {
@@ -109,6 +110,9 @@ fun main() {
             val hotkeys = AgentKeyBindings(
                 bindings = bindings,
                 enabled = { state.mode == AppMode.AGENTS },
+                // Both screens offer a terminal, and toggleTerminal knows which worktree each of
+                // them means; withholding the chord from one of the two would only puzzle.
+                terminalEnabled = { state.project != null },
                 // Splitting asks where the new pane runs: agents are spread across repositories,
                 // so a split is how one starts on a different worktree.
                 onSplitRight = { state.requestNewAgent(SplitAxis.ROW) },
@@ -116,6 +120,7 @@ fun main() {
                 onNewAgent = { state.requestNewAgent() },
                 onClosePane = state::closeFocusedAgent,
                 onZoomPane = state::toggleFocusedAgentZoom,
+                onTerminal = state::toggleTerminal,
             )
             hotkeys.install()
             onDispose { hotkeys.uninstall() }
