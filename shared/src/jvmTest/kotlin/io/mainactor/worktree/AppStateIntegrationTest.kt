@@ -1175,6 +1175,75 @@ class AppStateIntegrationTest {
         assertEquals(listOf(shell), state.terminals)
     }
 
+    /**
+     * The wall's terminal belongs to the focused *pane*, not to the project view's selection.
+     *
+     * Those two are different things and the difference is the whole feature: the pane you are
+     * looking at may be in a worktree — even a repository — the project view is not on, and a
+     * shell opened in the wrong one runs the command somewhere else without saying so.
+     */
+    @Test
+    fun `the wall's terminal opens in the focused agent's worktree`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val disposed = mutableListOf<String>()
+        val state = newState(onTerminalDisposed = { disposed += it })
+        state.openProject(mainRepo.path).join()
+        val path = File(root, "side").path
+        state.createWorktree(path, "side", null, "main", force = false).join()
+        val side = state.worktrees.single { it.branch == "side" }
+        state.startAgentFor(side)?.join()
+        // The project view is left looking at the main worktree, which is what the old code would
+        // have opened the shell in.
+        state.selectWorktree(state.worktrees.single { it.isMain }).join()
+
+        state.toggleTerminal()
+
+        val shell = state.terminals.single()
+        assertEquals(side.path, shell.workDir, "the shell opened where the project view was looking")
+        assertTrue(state.terminalVisible)
+
+        // Hiding is not closing. This is the claim the user cares about: a build in there survives.
+        state.toggleTerminal()
+        assertFalse(state.terminalVisible)
+        assertEquals(listOf(shell), state.terminals)
+        assertTrue(disposed.isEmpty(), "hiding the wall's terminal must not end its shell")
+
+        // And pressing it again gives back the same shell rather than stacking another.
+        state.toggleTerminal()
+        assertEquals(listOf(shell), state.terminals)
+        assertEquals(shell.id, state.activeTerminal)
+
+        // Only closing the tab ends it.
+        state.closeTerminal(shell.id)
+        assertEquals(listOf(shell.id), disposed)
+    }
+
+    @Test
+    fun `a second agent gets its own shell rather than the first one's`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val state = newState()
+        state.openProject(mainRepo.path).join()
+        val path = File(root, "side").path
+        state.createWorktree(path, "side", null, "main", force = false).join()
+        val main = state.worktrees.single { it.isMain }
+        val side = state.worktrees.single { it.branch == "side" }
+
+        state.startAgentFor(main)?.join()
+        state.toggleTerminal()
+        val first = state.terminals.single()
+
+        // Focus a pane in the other worktree and ask again: the directory has changed, so the
+        // shell that is already open is the wrong one to hand back.
+        state.startAgentFor(side)?.join()
+        state.toggleTerminal()
+        state.toggleTerminal()
+
+        val second = state.terminals.last { it.id != first.id }
+        assertEquals(side.path, second.workDir)
+        assertEquals(second.id, state.activeTerminal)
+        assertEquals(2, state.terminals.size)
+    }
+
     @Test
     fun `an agent can take you to its worktree in the project view`() = runBlocking {
         if (!gitAvailable) return@runBlocking

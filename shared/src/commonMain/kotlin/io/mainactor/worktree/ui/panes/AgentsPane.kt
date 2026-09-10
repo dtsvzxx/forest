@@ -68,7 +68,15 @@ import kotlinx.coroutines.delay
 fun AgentsPane(
     state: AppState,
     terminal: @Composable (session: TerminalSession, focused: Boolean, modifier: Modifier) -> Unit,
-    suspended: Boolean,
+    /**
+     * Why the panes are detached, or null while they are not.
+     *
+     * A reason rather than a flag because there are two of them now — a modal, and the wall's own
+     * terminal overlay — and a pane that says "paused while a dialog is open" with no dialog on
+     * screen is worse than one that says nothing. Detaching at all is the price of the JediTerm
+     * engine: a pane is a heavyweight Swing widget, and Compose drawn over one goes underneath it.
+     */
+    pausedBecause: String?,
     onAddAgent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -112,13 +120,13 @@ fun AgentsPane(
                     state = state,
                     session = zoomed,
                     terminal = terminal,
-                    suspended = suspended,
+                    pausedBecause = pausedBecause,
                     zoomed = true,
                     modifier = Modifier.fillMaxSize(),
                 )
 
                 else -> state.agentLayout?.let { layout ->
-                    PaneTree(layout, state, terminal, suspended, Modifier.fillMaxSize())
+                    PaneTree(layout, state, terminal, pausedBecause, Modifier.fillMaxSize())
                 }
             }
         }
@@ -136,7 +144,7 @@ private fun PaneTree(
     node: PaneNode,
     state: AppState,
     terminal: @Composable (session: TerminalSession, focused: Boolean, modifier: Modifier) -> Unit,
-    suspended: Boolean,
+    pausedBecause: String?,
     modifier: Modifier = Modifier,
 ) {
     when (node) {
@@ -145,7 +153,7 @@ private fun PaneTree(
                 state = state,
                 session = node.session,
                 terminal = terminal,
-                suspended = suspended,
+                pausedBecause = pausedBecause,
                 zoomed = false,
                 modifier = modifier,
             )
@@ -157,25 +165,25 @@ private fun PaneTree(
 
             if (node.axis == SplitAxis.ROW) {
                 Row(modifier.onSizeChanged { extentPx = it.width.toFloat() }) {
-                    PaneTree(node.first, state, terminal, suspended, Modifier.weight(fraction))
+                    PaneTree(node.first, state, terminal, pausedBecause, Modifier.weight(fraction))
                     ProportionalSplitter(
                         vertical = true,
                         fraction = fraction,
                         onFractionChange = { state.resizeAgentSplit(node.id, it) },
                         totalPx = extentPx,
                     )
-                    PaneTree(node.second, state, terminal, suspended, Modifier.weight(1f - fraction))
+                    PaneTree(node.second, state, terminal, pausedBecause, Modifier.weight(1f - fraction))
                 }
             } else {
                 Column(modifier.onSizeChanged { extentPx = it.height.toFloat() }) {
-                    PaneTree(node.first, state, terminal, suspended, Modifier.weight(fraction))
+                    PaneTree(node.first, state, terminal, pausedBecause, Modifier.weight(fraction))
                     ProportionalSplitter(
                         vertical = false,
                         fraction = fraction,
                         onFractionChange = { state.resizeAgentSplit(node.id, it) },
                         totalPx = extentPx,
                     )
-                    PaneTree(node.second, state, terminal, suspended, Modifier.weight(1f - fraction))
+                    PaneTree(node.second, state, terminal, pausedBecause, Modifier.weight(1f - fraction))
                 }
             }
         }
@@ -187,7 +195,7 @@ private fun AgentPane(
     state: AppState,
     session: TerminalSession,
     terminal: @Composable (session: TerminalSession, focused: Boolean, modifier: Modifier) -> Unit,
-    suspended: Boolean,
+    pausedBecause: String?,
     zoomed: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -253,8 +261,8 @@ private fun AgentPane(
                     state.recordAgentPaneSize(session.id, it.width, it.height)
                 },
             ) {
-                if (suspended) {
-                    EmptyState("Paused while a dialog is open — the agent keeps running.")
+                if (pausedBecause != null) {
+                    EmptyState(pausedBecause)
                 } else {
                     terminal(session, focused, Modifier.fillMaxSize())
                 }
@@ -461,6 +469,16 @@ private fun AgentsToolbar(state: AppState, onAddAgent: () -> Unit) {
                 onClick = { state.zoomedAgent?.let { state.toggleAgentZoom(it) } },
             )
         }
+        ToolButton(
+            icon = IconKind.TERMINAL,
+            // Named by the worktree it will land in, because on a wall spanning several
+            // repositories "a terminal" is not enough to know where the command would run.
+            tooltip = state.focusedAgentSession?.let { "Terminal in ${it.label} — hides without stopping" }
+                ?: "Terminal",
+            onClick = state::toggleTerminal,
+            enabled = hasPanes,
+        )
+        Divider()
         ToolButton(
             icon = IconKind.SPLIT_RIGHT,
             tooltip = "Split the focused agent to the right — choose the worktree for the new pane",

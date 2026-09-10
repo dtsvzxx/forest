@@ -434,6 +434,27 @@ the status sweep that dates uncommitted work, so the two lists cannot disagree. 
 it reuses `worktreeStatuses`; for any other it sweeps that repository, outside `gitLock` so browsing
 never blocks the window.
 
+**The wall's terminal is an overlay, and it opens where the focused *pane* is.** Pressing Terminal
+on the wall brings up a shell over it, in the worktree of the pane you are looking at — not the one
+the project view has selected, because the wall holds panes from repositories the window does not
+even have open, and a shell in the wrong repository is the kind of wrong you notice after the
+command has run. `AppState.toggleTerminal` is mode-aware for that reason alone; the sessions, the
+tabs and the hiding are the tool window's, unchanged. Pressing it twice gives back the same shell
+rather than stacking a second — the overlay's own `+` is what opens another.
+
+**Hiding is not closing, and that is the whole of what the user asked for.** `terminalVisible` is a
+flag; only `closeTerminal` calls `onTerminalDisposed`, so a build left running in there survives the
+overlay being dismissed, the mode being switched and the wall being rearranged.
+
+**The wall is detached while the overlay is up** (`AgentsPane.pausedBecause`). Not politeness: on
+the JediTerm engine — still the default — a pane is a heavyweight Swing widget, and Compose drawn
+over one of those is painted *underneath* it. Detaching is what `App` already does for a modal and
+it is the only thing that works on both engines. The parameter carries the *reason* rather than a
+flag because there are two of them now, and a pane reading "paused while a dialog is open" with no
+dialog on screen is worse than one that says nothing. `the wall's terminal opens over it, in the
+focused pane's worktree` pins both halves by counting which sessions the terminal slot is asked
+for — which no pixel could say.
+
 **Nothing spawns a shell implicitly.** Opening a project used to open a terminal and entering the
 agent wall used to start an agent; both are gone. A shell is a real process the user did not ask
 for, and the wall's own rule — every added pane asks where it runs — makes an automatic one

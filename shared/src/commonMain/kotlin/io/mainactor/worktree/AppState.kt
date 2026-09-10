@@ -1254,18 +1254,64 @@ class AppState(
 
     // ---------------------------------------------------------------- terminal
 
+    /**
+     * Shows the terminal, or hides it.
+     *
+     * Hiding is the whole point of the distinction between this and [closeTerminal]: a shell that
+     * is out of sight is still a running process with a build in it, and only [closeTerminal] ends
+     * one. Nothing here touches `onTerminalDisposed`.
+     *
+     * **Where a new shell opens depends on the mode**, because the two modes disagree about what
+     * "here" means. The project view has one selected worktree. The wall has a focused *pane*, and
+     * that pane's worktree may belong to a repository the window does not even have open — so
+     * taking the project view's selection there would open a shell in the wrong repository, which
+     * is the kind of wrong that is only noticed after the command has run.
+     */
     fun toggleTerminal() {
         terminalVisible = !terminalVisible
-        if (terminalVisible && terminals.isEmpty()) openTerminal()
+        if (!terminalVisible) return
+        if (mode == AppMode.AGENTS) showTerminalBesideAgent() else if (terminals.isEmpty()) openTerminal()
+    }
+
+    /**
+     * Brings up a shell in the focused pane's worktree, reusing one already open there.
+     *
+     * Reusing rather than stacking, because this is what the toolbar button does and a button
+     * pressed twice should give back the same terminal rather than a second one. The overlay's own
+     * `+` is what opens another ([openTerminalHere]).
+     */
+    private fun showTerminalBesideAgent() {
+        val agent = focusedAgentSession ?: return
+        val existing = terminals.lastOrNull { it.workDir == agent.workDir }
+        if (existing != null) activeTerminal = existing.id else openTerminalHere()
+    }
+
+    /** A *new* shell in the focused pane's worktree, which is what the overlay's `+` means. */
+    fun openTerminalHere() {
+        val agent = focusedAgentSession ?: return
+        openShellAt(agent.workDir, agent.label, agent.projectName)
     }
 
     fun openTerminal(worktree: Worktree? = selectedWorktree) {
         val target = worktree ?: return
+        openShellAt(target.path, target.label, projectName = null)
+    }
+
+    /**
+     * The one place a terminal session is made.
+     *
+     * A directory and a name rather than a `Worktree`, because the wall's panes are not always in
+     * the open project and there is no `Worktree` to hand for those.
+     */
+    private fun openShellAt(workDir: String, label: String, projectName: String?) {
         terminalSeq++
         val session = TerminalSession(
-            id = "term-$terminalSeq-${target.path.hashCode()}",
-            label = target.label,
-            workDir = target.path,
+            id = "term-$terminalSeq-${workDir.hashCode()}",
+            label = label,
+            workDir = workDir,
+            // Named on the wall, where panes come from several repositories, and left unsaid in
+            // the project view, where every tab belongs to the one that is open.
+            projectName = projectName,
         )
         terminals = terminals + session
         activeTerminal = session.id

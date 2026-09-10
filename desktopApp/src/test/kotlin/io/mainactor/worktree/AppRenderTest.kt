@@ -724,6 +724,72 @@ class AppRenderTest {
         render(worktrees = 40, into = File("build/reports/app-render-many.png"))
     }
 
+    /**
+     * The wall's terminal, and the two claims that decide whether it is right.
+     *
+     * It opens in the **focused pane's** worktree rather than the project view's selection — the
+     * two are deliberately different here — and while it is up the wall's panes are *detached*.
+     * That second half is not a nicety: on the engine that is still the default a pane is a
+     * heavyweight Swing widget, and Compose drawn over one goes underneath it. Counting which
+     * sessions the terminal slot is asked for says exactly that, which no pixel could.
+     */
+    @Test
+    fun `the wall's terminal opens over it, in the focused pane's worktree`() {
+        val state = fakeState(worktrees = 3)
+        val composed = mutableSetOf<String>()
+        // Captured inside the render block, where the worktree list exists, and read after it.
+        var agentDir = ""
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            App(state = state, terminal = { session, _, m ->
+                composed += session.id
+                Box(m.fillMaxSize().background(Color(0xFF1E1F22))) {
+                    BasicText(
+                        text = "$ ${session.title}",
+                        style = TextStyle(color = Color(0xFF5FAD65), fontSize = 12.sp),
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            })
+        }
+
+        val image = try {
+            scene.render()
+            scene.render()
+            state.switchTo(AppMode.AGENTS)
+            val worktree = state.worktrees.first { !it.isMain }
+            agentDir = worktree.path
+            state.openAgent(worktree)
+            state.openAgent(worktree, SplitAxis.ROW)
+            scene.render()
+            scene.render()
+            assertEquals(
+                state.agents.map { it.id }.toSet(),
+                composed.toSet(),
+                "the wall's own panes should be on screen before the terminal is opened",
+            )
+
+            composed.clear()
+            state.toggleTerminal()
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+        }
+
+        File("build/reports/app-render-agent-terminal.png").apply { parentFile?.mkdirs() }
+            .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
+
+        // The project view is looking at the main worktree; the focused pane is not in it.
+        val shell = state.terminals.single()
+        assertEquals(agentDir, shell.workDir, "the shell opened where the project view was looking")
+
+        assertEquals(
+            setOf(shell.id),
+            composed,
+            "while the overlay is up the wall must be detached, and only its own shell drawn",
+        )
+    }
+
     @Test
     fun `renders the agent wall`() {
         val state = fakeState(worktrees = 3)
