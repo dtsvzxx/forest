@@ -1,13 +1,10 @@
 package io.mainactor.worktree
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.mainactor.worktree.model.Task
@@ -127,13 +123,19 @@ fun App(
             )
 
             if (state.mode == AppMode.AGENTS) {
-                // The wall takes the whole content area: the panes are what you are working in.
-                Box(
+                // The wall and its terminal are two panes of one column, laid out exactly the way
+                // the project view lays out its own: the terminal *takes* room rather than
+                // covering anything. It was an overlay for one release, which cost the wall its
+                // panes — a pane is a heavyweight Swing widget on the default engine, and Compose
+                // drawn over one goes underneath it, so the only way to float anything above the
+                // wall was to detach the wall. Every agent on screen went blank to run one
+                // `git status`. Docking asks that question away.
+                Column(
                     Modifier
                         .weight(1f)
                         .padding(Dimens.paneGap)
-                        // The wall measures itself for the same reason the project view does: the
-                        // overlay must not grow past a share of it, however tall it was dragged.
+                        // Measured for the same reason the project view measures itself: the
+                        // terminal must not grow past a share of it, however tall it was dragged.
                         .onSizeChanged {
                             contentSize = with(density) { DpSize(it.width.toDp(), it.height.toDp()) }
                         },
@@ -141,28 +143,35 @@ fun App(
                     AgentsPane(
                         state = state,
                         terminal = terminal,
-                        // Detached while the overlay is up, and not out of politeness: a pane is a
-                        // heavyweight Swing widget on the engine that is still the default, and
-                        // Compose content over one of those is painted *underneath* it. Detaching
-                        // is what this window already does for a modal, and it is the only thing
-                        // that works whichever engine the panes are running on.
-                        pausedBecause = when {
-                            dialog != null -> "Paused while a dialog is open — the agent keeps running."
-                            state.terminalVisible -> "Paused while the terminal is open — the agent keeps running."
-                            else -> null
-                        },
+                        // Only a modal detaches them now, which is the case that has no way round:
+                        // a dialog really is drawn over the wall.
+                        pausedBecause = "Paused while a dialog is open — the agent keeps running."
+                            .takeIf { dialog != null },
                         onAddAgent = { state.requestNewAgent() },
-                        modifier = Modifier.fillMaxSize().pane(),
+                        modifier = Modifier.weight(1f).pane(),
                     )
                     if (state.terminalVisible) {
-                        TerminalOverlay(
+                        HorizontalSplitter(
+                            size = terminalHeight,
+                            onSizeChange = { terminalHeight = it },
+                            min = 100.dp,
+                            max = 720.dp,
+                            sizesTrailingPane = true,
+                        )
+                        TerminalToolWindow(
                             state = state,
                             terminal = terminal,
                             suspended = dialog != null,
-                            height = minOf(terminalHeight, contentSize.height * TERMINAL_MAX_SHARE)
-                                .takeIf { contentSize.height > 0.dp } ?: terminalHeight,
-                            onHeightChange = { terminalHeight = it },
-                            modifier = Modifier.align(Alignment.BottomCenter),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(
+                                    if (contentSize.height > 0.dp) {
+                                        minOf(terminalHeight, contentSize.height * TERMINAL_MAX_SHARE)
+                                    } else {
+                                        terminalHeight
+                                    }
+                                )
+                                .pane(),
                         )
                     }
                 }
@@ -329,63 +338,11 @@ private fun TerminalToolWindow(
             state = state,
             terminal = terminal,
             suspended = suspended,
-            onNewTab = { state.openTerminal() },
-            newTabTooltip = "New shell tab in the selected worktree",
-            canOpenNewTab = state.selectedWorktree != null,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-/**
- * The wall's terminal, floating over it.
- *
- * A card rather than a docked strip, because the wall has no room to give: every pane on it is a
- * running agent the user arranged, and taking a third of the height away from all of them to run
- * one `git status` is the wrong trade. It opens in the **focused pane's** worktree — see
- * `AppState.toggleTerminal` for why that is not the project view's selection — and hiding it is
- * `terminalVisible`, which touches no process at all: only closing a tab ends its shell.
- *
- * The wall behind is detached while this is up. That is not a nicety: on the JediTerm engine a
- * pane is a heavyweight Swing widget, and Compose drawn over one of those goes underneath it.
- */
-@Composable
-private fun TerminalOverlay(
-    state: AppState,
-    terminal: @Composable (session: TerminalSession, focused: Boolean, modifier: Modifier) -> Unit,
-    suspended: Boolean,
-    height: Dp,
-    onHeightChange: (Dp) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalWorktreeColors.current
-    val here = state.focusedAgentSession
-
-    Column(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .pane()
-            .background(colors.editor)
-            .border(1.dp, colors.separator, RoundedCornerShape(Dimens.paneArc)),
-    ) {
-        // Drags its own top edge. `sizesTrailingPane` because the overlay is *below* the divider:
-        // pulling up has to make it taller, not shorter.
-        HorizontalSplitter(
-            size = height,
-            onSizeChange = onHeightChange,
-            min = 120.dp,
-            max = 900.dp,
-            sizesTrailingPane = true,
-            color = colors.separator,
-        )
-        TerminalTabs(
-            state = state,
-            terminal = terminal,
-            suspended = suspended,
-            onNewTab = state::openTerminalHere,
-            newTabTooltip = here?.let { "New shell in ${it.label}" } ?: "New shell",
-            canOpenNewTab = here != null,
+            // Named by the worktree it would land in: on the wall that is the focused pane's,
+            // which is not necessarily — and across repositories not usually — the selected one.
+            onNewTab = state::openAnotherTerminal,
+            newTabTooltip = state.terminalHomeLabel?.let { "New shell in $it" } ?: "New shell",
+            canOpenNewTab = state.terminalHomeLabel != null,
             modifier = Modifier.weight(1f),
         )
     }

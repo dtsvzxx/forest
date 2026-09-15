@@ -445,26 +445,31 @@ the status sweep that dates uncommitted work, so the two lists cannot disagree. 
 it reuses `worktreeStatuses`; for any other it sweeps that repository, outside `gitLock` so browsing
 never blocks the window.
 
-**The wall's terminal is an overlay, and it opens where the focused *pane* is.** Pressing Terminal
-on the wall brings up a shell over it, in the worktree of the pane you are looking at — not the one
-the project view has selected, because the wall holds panes from repositories the window does not
-even have open, and a shell in the wrong repository is the kind of wrong you notice after the
-command has run. `AppState.toggleTerminal` is mode-aware for that reason alone; the sessions, the
-tabs and the hiding are the tool window's, unchanged. Pressing it twice gives back the same shell
-rather than stacking a second — the overlay's own `+` is what opens another.
+**The wall's terminal is docked under it, and it opens where the focused *pane* is.** The shell
+lands in the worktree of the pane you are looking at — not the one the project view has selected,
+because the wall holds panes from repositories the window does not even have open, and a shell in
+the wrong repository is the kind of wrong you notice after the command has run. `toggleTerminal`
+and `openAnotherTerminal` are mode-aware for that reason alone, and `terminalHomeLabel` is what
+names the worktree on the `+`; the sessions, the tabs and the hiding are the tool window's,
+unchanged, and the wall lays it out exactly the way the project view lays out its own. Pressing
+Terminal twice gives back the same shell rather than stacking a second.
 
-**Hiding is not closing, and that is the whole of what the user asked for.** `terminalVisible` is a
-flag; only `closeTerminal` calls `onTerminalDisposed`, so a build left running in there survives the
-overlay being dismissed, the mode being switched and the wall being rearranged.
+**Hiding is not closing.** `terminalVisible` is a flag; only `closeTerminal` calls
+`onTerminalDisposed`, so a build left running in there survives the terminal being dismissed, the
+mode being switched and the wall being rearranged.
 
-**The wall is detached while the overlay is up** (`AgentsPane.pausedBecause`). Not politeness: on
-the JediTerm engine — still the default — a pane is a heavyweight Swing widget, and Compose drawn
-over one of those is painted *underneath* it. Detaching is what `App` already does for a modal and
-it is the only thing that works on both engines. The parameter carries the *reason* rather than a
-flag because there are two of them now, and a pane reading "paused while a dialog is open" with no
-dialog on screen is worse than one that says nothing. `the wall's terminal opens over it, in the
-focused pane's worktree` pins both halves by counting which sessions the terminal slot is asked
-for — which no pixel could say.
+**It was an overlay for one release, and docking is the fix.** Nothing can float above the wall
+while the default engine is JediTerm: a pane is a heavyweight Swing widget and Compose drawn over
+one goes *underneath* it, so the overlay had to detach the wall to be seen at all — every agent on
+screen went blank to run one `git status`. A docked pane takes room instead of covering anything,
+which asks the question away and works on either engine. `AgentsPane.pausedBecause` survives for
+the one case with no way round, a modal, and carries the reason rather than a flag.
+
+`the wall keeps its panes when the terminal opens in the focused one's worktree` pins it, and the
+way it reads the second half is the part worth keeping: it composes a **fresh scene**. Clearing the
+record and re-rendering the same one proves nothing either way, because Compose does not re-invoke
+a pane whose inputs did not change — an untouched wall and a detached one both leave the slot
+uncalled. The overlay's own test asserted detachment that way and passed for the wrong reason.
 
 **Nothing spawns a shell implicitly.** Opening a project used to open a terminal and entering the
 agent wall used to start an agent; both are gone. A shell is a real process the user did not ask

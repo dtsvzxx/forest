@@ -1286,11 +1286,25 @@ class AppState(
         if (existing != null) activeTerminal = existing.id else openTerminalHere()
     }
 
-    /** A *new* shell in the focused pane's worktree, which is what the overlay's `+` means. */
+    /** A *new* shell in the focused pane's worktree. */
     fun openTerminalHere() {
         val agent = focusedAgentSession ?: return
         openShellAt(agent.workDir, agent.label, agent.projectName)
     }
+
+    /**
+     * Another shell where "here" is, which is what the tool window's `+` means on either screen.
+     *
+     * The same question [toggleTerminal] answers, asked by the other button: the wall means the
+     * focused pane, the project view means the selected worktree.
+     */
+    fun openAnotherTerminal() {
+        if (mode == AppMode.AGENTS) openTerminalHere() else openTerminal()
+    }
+
+    /** What "here" is called, so the `+` can name the worktree it would open a shell in. */
+    val terminalHomeLabel: String?
+        get() = if (mode == AppMode.AGENTS) focusedAgentSession?.label else selectedWorktree?.label
 
     fun openTerminal(worktree: Worktree? = selectedWorktree) {
         val target = worktree ?: return

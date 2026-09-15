@@ -728,18 +728,22 @@ class AppRenderTest {
      * The wall's terminal, and the two claims that decide whether it is right.
      *
      * It opens in the **focused pane's** worktree rather than the project view's selection — the
-     * two are deliberately different here — and while it is up the wall's panes are *detached*.
-     * That second half is not a nicety: on the engine that is still the default a pane is a
-     * heavyweight Swing widget, and Compose drawn over one goes underneath it. Counting which
-     * sessions the terminal slot is asked for says exactly that, which no pixel could.
+     * two are deliberately different here — and it is *docked*, so every agent on the wall keeps
+     * its terminal. It was an overlay for one release and the wall had to be detached to let
+     * anything float above it, which blanked every pane to run one command.
+     *
+     * **The second half is read off a fresh composition, and it has to be.** Clearing the record
+     * and rendering the same scene again proves nothing either way: Compose does not re-invoke a
+     * pane whose inputs did not change, so an untouched wall and a detached one both leave the
+     * slot uncalled. A scene composed from scratch asks for every pane that is on screen.
      */
     @Test
-    fun `the wall's terminal opens over it, in the focused pane's worktree`() {
+    fun `the wall keeps its panes when the terminal opens in the focused one's worktree`() {
         val state = fakeState(worktrees = 3)
         val composed = mutableSetOf<String>()
-        // Captured inside the render block, where the worktree list exists, and read after it.
         var agentDir = ""
-        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+
+        fun scene() = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             App(state = state, terminal = { session, _, m ->
                 composed += session.id
                 Box(m.fillMaxSize().background(Color(0xFF1E1F22))) {
@@ -752,41 +756,47 @@ class AppRenderTest {
             })
         }
 
-        val image = try {
-            scene.render()
-            scene.render()
+        val first = scene()
+        try {
+            first.render()
+            first.render()
             state.switchTo(AppMode.AGENTS)
             val worktree = state.worktrees.first { !it.isMain }
             agentDir = worktree.path
             state.openAgent(worktree)
             state.openAgent(worktree, SplitAxis.ROW)
-            scene.render()
-            scene.render()
+            first.render()
+            first.render()
             assertEquals(
                 state.agents.map { it.id }.toSet(),
                 composed.toSet(),
                 "the wall's own panes should be on screen before the terminal is opened",
             )
-
-            composed.clear()
             state.toggleTerminal()
-            scene.render()
-            scene.render()
         } finally {
-            scene.close()
+            first.close()
+        }
+
+        // The project view is still looking at the main worktree; the focused pane is not in it.
+        val shell = state.terminals.single()
+        assertEquals(agentDir, shell.workDir, "the shell opened where the project view was looking")
+
+        composed.clear()
+        val second = scene()
+        val image = try {
+            second.render()
+            second.render()
+        } finally {
+            second.close()
         }
 
         File("build/reports/app-render-agent-terminal.png").apply { parentFile?.mkdirs() }
             .writeBytes(image.encodeToData(EncodedImageFormat.PNG)?.bytes!!)
 
-        // The project view is looking at the main worktree; the focused pane is not in it.
-        val shell = state.terminals.single()
-        assertEquals(agentDir, shell.workDir, "the shell opened where the project view was looking")
-
         assertEquals(
-            setOf(shell.id),
+            state.agents.map { it.id }.toSet() + shell.id,
             composed,
-            "while the overlay is up the wall must be detached, and only its own shell drawn",
+            "the terminal took the wall's panes off screen instead of taking room beside them",
         )
     }
 
