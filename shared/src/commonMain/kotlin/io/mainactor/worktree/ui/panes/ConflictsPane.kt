@@ -297,7 +297,7 @@ private fun ContextBlock(lines: List<String>) {
             } else {
                 Box(Modifier.fillMaxWidth().horizontalScroll(hScroll)) {
                     Text(
-                        text = line.ifEmpty { " " },
+                        text = shownText(line).ifEmpty { " " },
                         style = CodeTextStyle,
                         color = colors.textDim,
                         softWrap = false,
@@ -466,7 +466,7 @@ private fun SidePanel(
                 lines.take(MAX_SIDE_LINES).forEach { line ->
                     Box(Modifier.fillMaxWidth().horizontalScroll(hScroll)) {
                         Text(
-                            text = line.ifEmpty { " " },
+                            text = shownText(line).ifEmpty { " " },
                             style = CodeTextStyle,
                             color = if (dimmed) colors.textDim else colors.text,
                             softWrap = false,

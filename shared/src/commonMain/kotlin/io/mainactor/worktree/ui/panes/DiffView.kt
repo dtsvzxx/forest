@@ -43,6 +43,20 @@ import io.mainactor.worktree.ui.theme.Dimens
 import io.mainactor.worktree.ui.theme.LocalWorktreeColors
 import kotlin.math.max
 
+/**
+ * The most of one line a row draws. Every row is as wide as the longest, and a minified bundle or
+ * a lockfile is one line of millions of characters — as a width in pixels that is more than
+ * Compose's `Constraints` can represent, and it threw out of layout and took the window down. Long
+ * before that limit a line stops being readable in a diff, so the rest is named rather than drawn;
+ * "Copy line" still copies all of it.
+ */
+internal const val MAX_SHOWN_CHARS = 2_000
+
+/** [text] as a row draws it: whole when it fits, otherwise cut short with what was left out. */
+internal fun shownText(text: String): String =
+    if (text.length <= MAX_SHOWN_CHARS) text
+    else text.take(MAX_SHOWN_CHARS) + "  … ${text.length - MAX_SHOWN_CHARS} more characters"
+
 /** One rendered row of the diff: either a `@@` separator or a real line. */
 private sealed interface DiffRow {
     data class Header(val text: String) : DiffRow
@@ -115,8 +129,8 @@ fun DiffView(
     val longest = remember(rows) {
         rows.maxOf { row ->
             when (row) {
-                is DiffRow.Header -> row.text.length
-                is DiffRow.Line -> row.line.text.length + 1
+                is DiffRow.Header -> shownText(row.text).length
+                is DiffRow.Line -> shownText(row.line.text).length + 1
             }
         }
     }
@@ -165,7 +179,7 @@ private fun HunkHeaderRow(
         Box(Modifier.width(Dimens.gutterWidth).height(18.dp))
         Box(Modifier.weight(1f).horizontalScroll(hScroll)) {
             Text(
-                text = text,
+                text = shownText(text),
                 style = CodeTextStyle,
                 color = colors.link.copy(alpha = 0.9f),
                 softWrap = false,
@@ -216,7 +230,7 @@ private fun DiffLineRow(
         }
         Box(Modifier.weight(1f).horizontalScroll(hScroll)) {
             Text(
-                text = annotate(marker, line.text, tokens, colors),
+                text = annotate(marker, shownText(line.text), tokens, colors),
                 style = CodeTextStyle,
                 color = textColor,
                 softWrap = false,
@@ -274,7 +288,7 @@ private fun annotate(
         append(text)
         tokens.spans.forEach { span ->
             val from = span.start + marker.length
-            val to = minOf(span.end + marker.length, length)
+            val to = minOf(minOf(span.end, MAX_SHOWN_CHARS) + marker.length, length)
             if (to > from) addStyle(SpanStyle(color = span.kind.colour(colors)), from, to)
         }
     }

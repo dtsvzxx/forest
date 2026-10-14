@@ -348,7 +348,7 @@ private fun ConsoleEntry(state: AppState, entry: GitLogEntry) {
         if (entry.output.isNotBlank()) {
             Box(Modifier.fillMaxWidth().horizontalScroll(hScroll)) {
                 Text(
-                    text = entry.output.lines().take(MAX_OUTPUT_LINES).joinToString("\n"),
+                    text = entry.output.lines().take(MAX_OUTPUT_LINES).joinToString("\n") { shownText(it) },
                     color = if (entry.ok) colors.textDim else colors.conflicted.copy(alpha = 0.85f),
                     style = CodeTextStyle,
                     softWrap = false,

@@ -73,6 +73,34 @@ class AppRenderTest {
     }
 
     @Test
+    fun `a diff with a minified line renders instead of crashing`() {
+        // A bundle or a lockfile on one line: millions of characters, which as a row width is more
+        // pixels than Compose's Constraints can hold, and the whole window went down with it.
+        val line = "x".repeat(3_000_000)
+        val diff = io.mainactor.worktree.model.FileDiff(
+            path = "dist/app.min.js",
+            hunks = listOf(
+                io.mainactor.worktree.model.DiffHunk(
+                    header = "@@ -1 +1 @@", oldStart = 1, oldCount = 1, newStart = 1, newCount = 1,
+                    lines = listOf(
+                        io.mainactor.worktree.model.DiffLine(io.mainactor.worktree.model.DiffLineType.DELETE, line, oldNumber = 1),
+                        io.mainactor.worktree.model.DiffLine(io.mainactor.worktree.model.DiffLineType.ADD, line + "y", newNumber = 1),
+                    ),
+                ),
+            ),
+        )
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(2f), Dispatchers.Unconfined) {
+            WorktreeTheme { io.mainactor.worktree.ui.panes.DiffView(diff = diff, loading = false) }
+        }
+        try {
+            scene.render()
+            scene.render()
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun `the log shows a commit's files and its patch`() {
         val state = fakeState(worktrees = 2)
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
