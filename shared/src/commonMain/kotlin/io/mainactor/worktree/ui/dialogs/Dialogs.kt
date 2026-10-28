@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -154,17 +155,33 @@ private fun CheckRow(label: String, checked: Boolean, onToggle: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(13.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(if (checked) colors.accent else Color.Transparent)
-                .border(1.dp, if (checked) colors.accent else colors.controlBorder, RoundedCornerShape(3.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (checked) IdeIcon(IconKind.CHECK, Color.White, size = 9.dp)
-        }
+        CheckBox(checked)
         Text(label, color = colors.text, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** The square of a [CheckRow], on its own for rows that carry more than a label. */
+@Composable
+private fun CheckBox(checked: Boolean, enabled: Boolean = true) {
+    val colors = LocalWorktreeColors.current
+    val on = checked && enabled
+    Box(
+        modifier = Modifier
+            .size(13.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(if (on) colors.accent else Color.Transparent)
+            .border(
+                1.dp,
+                when {
+                    on -> colors.accent
+                    enabled -> colors.controlBorder
+                    else -> colors.separator
+                },
+                RoundedCornerShape(3.dp),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (on) IdeIcon(IconKind.CHECK, Color.White, size = 9.dp)
     }
 }
 
@@ -908,6 +925,206 @@ fun RemoveWorktreeDialog(
         }
     }
 }
+
+/**
+ * Removes several worktrees at once: every one but the main working tree is listed, and the ticked
+ * ones go together.
+ *
+ * Nothing starts ticked. Ticking is the decision, and a dialog that arrived with the selected row
+ * already chosen would delete it for someone who opened it only to look. A locked worktree is shown
+ * but cannot be ticked — git refuses it short of `-f -f`, and a lock is somebody saying "keep this";
+ * unlocking it is a separate, deliberate step. Uncommitted changes are named on the row, because
+ * that is the one thing a removal really destroys.
+ */
+@Composable
+fun RemoveWorktreesDialog(
+    worktrees: List<Worktree>,
+    /** Uncommitted changes per worktree path, as far as the badge sweep knows. */
+    dirtyFiles: (Worktree) -> Int,
+    onDismiss: () -> Unit,
+    onConfirm: (worktrees: List<Worktree>, force: Boolean) -> Unit,
+) {
+    val colors = LocalWorktreeColors.current
+    val candidates = remember(worktrees) { worktrees.filterNot { it.isMain } }
+    val removable = remember(candidates) { candidates.filterNot { it.isLocked } }
+    var ticked by remember { mutableStateOf(emptySet<String>()) }
+    var filter by remember { mutableStateOf("") }
+    var force by remember { mutableStateOf(false) }
+
+    val shown = remember(candidates, filter) {
+        if (filter.isBlank()) candidates
+        else candidates.filter {
+            it.label.contains(filter, ignoreCase = true) || it.name.contains(filter, ignoreCase = true)
+        }
+    }
+    // "All" means all of what is on screen: with a filter typed, ticking everything the filter
+    // hides would delete worktrees nobody looked at.
+    val shownRemovable = shown.filterNot { it.isLocked }
+    val allShownTicked = shownRemovable.isNotEmpty() && shownRemovable.all { it.path in ticked }
+    val chosen = removable.filter { it.path in ticked }
+    val dirtyChosen = chosen.count { dirtyFiles(it) > 0 }
+
+    Modal(
+        title = "Remove worktrees",
+        onDismiss = onDismiss,
+        width = 560.dp,
+        footer = {
+            IdeButton("Cancel", onDismiss)
+            IdeButton(
+                text = if (chosen.isEmpty()) "Remove" else "Remove ${chosen.size}",
+                onClick = { onConfirm(chosen, force) },
+                enabled = chosen.isNotEmpty(),
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Tick the worktrees to remove. Their directories and contents are deleted; the branches are kept.",
+                color = colors.text,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (candidates.isEmpty()) {
+                Text(
+                    "There is nothing to remove besides the main working tree.",
+                    color = colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                return@Column
+            }
+            if (candidates.size > FILTER_THRESHOLD) {
+                IdeTextField(
+                    value = filter,
+                    onValueChange = { filter = it },
+                    placeholder = "Filter worktrees",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = shownRemovable.isNotEmpty()) {
+                        val paths = shownRemovable.map { it.path }
+                        ticked = if (allShownTicked) ticked - paths.toSet() else ticked + paths
+                    }
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CheckBox(allShownTicked, enabled = shownRemovable.isNotEmpty())
+                Text(
+                    if (filter.isBlank()) "All" else "All matching",
+                    color = colors.textDim,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${chosen.size} of ${removable.size} selected",
+                    color = colors.textDisabled,
+                    fontSize = 11.sp,
+                )
+            }
+            val scroll = rememberScrollState()
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 340.dp)
+                    .clip(RoundedCornerShape(Dimens.arc))
+                    .border(1.dp, colors.separator, RoundedCornerShape(Dimens.arc)),
+            ) {
+                Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(vertical = 2.dp)) {
+                    shown.forEach { worktree ->
+                        RemovableWorktreeRow(
+                            worktree = worktree,
+                            ticked = worktree.path in ticked,
+                            dirty = dirtyFiles(worktree),
+                            onToggle = {
+                                ticked = if (worktree.path in ticked) ticked - worktree.path else ticked + worktree.path
+                            },
+                        )
+                    }
+                    if (shown.isEmpty()) {
+                        Text(
+                            "No worktree matches \"$filter\".",
+                            color = colors.textDim,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(8.dp),
+                        )
+                    }
+                }
+                // matchParentSize, not a height of its own: a scrollbar that filled the box would
+                // stretch it to its maximum with four rows in it.
+                VerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(scroll),
+                    modifier = Modifier.matchParentSize().wrapContentWidth(Alignment.End),
+                )
+            }
+            if (dirtyChosen > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    IdeIcon(IconKind.WARNING, colors.warning, size = 12.dp)
+                    val have = if (dirtyChosen == 1) "1 of them has" else "$dirtyChosen of them have"
+                    Text(
+                        if (force) {
+                            "$have uncommitted changes, which will be lost."
+                        } else {
+                            "$have uncommitted changes — git keeps those worktrees unless Force is on."
+                        },
+                        color = colors.warning,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            CheckRow("Force removal", force) { force = !force }
+        }
+    }
+}
+
+@Composable
+private fun RemovableWorktreeRow(worktree: Worktree, ticked: Boolean, dirty: Int, onToggle: () -> Unit) {
+    val colors = LocalWorktreeColors.current
+    val enabled = !worktree.isLocked
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onToggle)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CheckBox(ticked, enabled = enabled)
+        Text(
+            worktree.label,
+            color = if (enabled) colors.text else colors.textDisabled,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        when {
+            worktree.isLocked -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                IdeIcon(IconKind.LOCK, colors.warning, size = 11.dp)
+                Text("locked", color = colors.textDisabled, fontSize = 11.sp)
+            }
+            dirty > 0 -> Text(
+                "$dirty uncommitted",
+                color = colors.warning,
+                fontSize = 11.sp,
+                maxLines = 1,
+            )
+        }
+        worktree.lastActivityLabel?.let {
+            Text(it, color = colors.textDisabled, fontSize = 11.sp, maxLines = 1)
+        }
+    }
+}
+
+/** Past this many worktrees the dialog offers a filter, the same as the pane does. */
+private const val FILTER_THRESHOLD = 8
 
 @Composable
 fun CloneDialog(

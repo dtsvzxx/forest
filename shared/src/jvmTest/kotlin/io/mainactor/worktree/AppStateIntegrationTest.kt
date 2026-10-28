@@ -960,6 +960,38 @@ class AppStateIntegrationTest {
     }
 
     @Test
+    fun `removing several worktrees keeps going past one git refuses`() = runBlocking {
+        if (!gitAvailable) return@runBlocking
+        val disposed = mutableListOf<String>()
+        val state = newState(onTerminalDisposed = { disposed += it })
+        state.openProject(mainRepo.path).join()
+        for (name in listOf("one", "two", "dirty")) {
+            state.createWorktree(File(root, "wt-$name").path, name, null, "main", force = false).join()
+        }
+        File(root, "wt-dirty/file.txt").appendText("unsaved\n")
+        state.openTerminal(state.worktrees.single { it.branch == "one" })
+        val doomed = state.worktrees.filterNot { it.isMain }
+        assertEquals(3, doomed.size)
+
+        state.removeWorktrees(doomed, force = false).join()
+
+        assertEquals(listOf("dirty"), state.worktrees.filterNot { it.isMain }.map { it.branch })
+        assertFalse(File(root, "wt-one").exists())
+        assertFalse(File(root, "wt-two").exists())
+        assertTrue(File(root, "wt-dirty/file.txt").readText().contains("unsaved"))
+        assertTrue(disposed.isNotEmpty(), "a removed worktree's terminal should have been torn down")
+        val notice = state.notice
+        assertTrue(notice != null && notice.isError, "a refusal must be reported")
+        assertTrue("Removed 2 of 3" in notice.text && "wt-dirty" in notice.text, notice.text)
+
+        state.removeWorktrees(state.worktrees, force = true).join()
+
+        assertEquals(1, state.worktrees.size, "only the main working tree should be left")
+        assertFalse(File(root, "wt-dirty").exists())
+        assertEquals(false, state.notice?.isError)
+    }
+
+    @Test
     fun `staging, unstaging and committing move files through the index`() = runBlocking {
         if (!gitAvailable) return@runBlocking
         val state = newState()

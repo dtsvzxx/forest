@@ -56,6 +56,7 @@ fun WorktreesPane(
     state: AppState,
     onCreate: () -> Unit,
     onRemove: (Worktree) -> Unit,
+    onRemoveMany: () -> Unit,
     onSwitchBranch: (Worktree) -> Unit,
     onRename: (Worktree) -> Unit,
     modifier: Modifier = Modifier,
@@ -93,6 +94,13 @@ fun WorktreesPane(
                 detail = "git worktree remove",
                 onClick = { selected?.let(onRemove) },
                 enabled = selected != null && !selected.isMain,
+            )
+            ToolButton(
+                icon = IconKind.REMOVE_MANY,
+                tooltip = "Remove several worktrees — tick the ones to delete",
+                detail = "git worktree remove, once per worktree",
+                onClick = onRemoveMany,
+                enabled = state.worktrees.any { !it.isMain },
             )
             ToolButton(
                 icon = IconKind.BRANCH,

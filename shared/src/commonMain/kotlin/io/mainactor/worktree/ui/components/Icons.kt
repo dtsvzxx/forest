@@ -38,7 +38,7 @@ fun IdeIcon(
 enum class IconKind {
     PLUS, MINUS, REFRESH, ARROW_DOWN, ARROW_UP, FETCH, COMMIT, MERGE, REBASE, BRANCH,
     FOLDER, TERMINAL, CLOSE, CHEVRON_DOWN, LOCK, WARNING, CHECK, STAGE, UNSTAGE, REVERT, HOME,
-    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, TASK, MAXIMIZE, RESTORE,
+    SPLIT_RIGHT, SPLIT_DOWN, GOTO, SETTINGS, EXPAND, TASK, MAXIMIZE, RESTORE, REMOVE_MANY,
 }
 
 internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
@@ -71,6 +71,16 @@ internal fun DrawScope.drawIcon(icon: IconKind, tint: Color, s: Float) {
             line(0.18f, 0.5f, 0.82f, 0.5f)
         }
         IconKind.MINUS -> line(0.18f, 0.5f, 0.82f, 0.5f)
+        // A list with a cross against it: several of something, going. It sits beside the minus,
+        // which removes one, and has to read as a different button at 14dp — three rules are a list
+        // where one rule would only be a longer minus.
+        IconKind.REMOVE_MANY -> {
+            line(0.12f, 0.22f, 0.7f, 0.22f)
+            line(0.12f, 0.46f, 0.7f, 0.46f)
+            line(0.12f, 0.7f, 0.42f, 0.7f)
+            line(0.6f, 0.62f, 0.86f, 0.88f)
+            line(0.86f, 0.62f, 0.6f, 0.88f)
+        }
         // Four corners pushing outwards, and the same four turned around. A plus and a minus were
         // standing here, which is what the button beside them means — "add a pane" — while this one
         // means "give this pane the whole wall". Corner brackets are what every player and every

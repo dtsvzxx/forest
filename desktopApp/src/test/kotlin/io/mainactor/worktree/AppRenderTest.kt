@@ -326,6 +326,56 @@ class AppRenderTest {
     }
 
     @Test
+    fun `renders the remove-several-worktrees dialog`() {
+        val worktrees = listOf(
+            Worktree(path = "/repo", branch = "main", isMain = true),
+            Worktree(path = "/wt/feature-payments", branch = "feature/payments", lastActivityLabel = "5 min ago"),
+            Worktree(path = "/wt/NOTASK-partial-payments-rollout", branch = "NOTASK-partial-payments-rollout", lastActivityLabel = "2 hours ago"),
+            Worktree(path = "/wt/release", branch = "release/1.5", isLocked = true, lastActivityLabel = "3 days ago"),
+            Worktree(path = "/wt/spike", branch = "spike/tree-sitter", lastActivityLabel = "6 weeks ago"),
+        )
+        var chosen: List<Worktree>? = null
+        val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
+            WorktreeTheme {
+                Box(Modifier.fillMaxSize().background(LocalWorktreeColors.current.editor)) {
+                    io.mainactor.worktree.ui.dialogs.RemoveWorktreesDialog(
+                        worktrees = worktrees,
+                        dirtyFiles = { if (it.branch == "feature/payments") 4 else 0 },
+                        onDismiss = {},
+                        onConfirm = { list, _ -> chosen = list },
+                    )
+                }
+            }
+        }
+        fun click(at: Offset) {
+            scene.sendPointerEvent(PointerEventType.Move, at)
+            scene.sendPointerEvent(PointerEventType.Press, at, button = PointerButton.Primary)
+            scene.sendPointerEvent(PointerEventType.Release, at, button = PointerButton.Primary)
+            scene.render()
+        }
+        val image = try {
+            scene.render()
+            scene.render()
+            // Where the dialog draws "All" and "Remove" at this size.
+            click(Offset(490f, 381f))
+            val ticked = scene.render()
+            click(Offset(940f, 610f))
+            ticked
+        } finally {
+            scene.close()
+        }
+        val png = image.encodeToData(EncodedImageFormat.PNG)?.bytes
+        assertTrue(png != null && png.isNotEmpty())
+        File("build/reports/app-render-remove-many.png").apply { parentFile?.mkdirs() }.writeBytes(png)
+
+        // "All" takes every worktree but the main one and the locked one.
+        assertEquals(
+            listOf("feature/payments", "NOTASK-partial-payments-rollout", "spike/tree-sitter"),
+            chosen?.map { it.branch },
+        )
+    }
+
+    @Test
     fun `renders the commit dialog`() {
         val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), Dispatchers.Unconfined) {
             WorktreeTheme {

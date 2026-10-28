@@ -972,6 +972,54 @@ class AppState(
             fail(result)
             return@run
         }
+        forget(worktree)
+        notice = Notice("Removed ${worktree.name}", isError = false)
+        reloadProject(selectPath = null)
+    }
+
+    /**
+     * Removes several worktrees under one lock and with one refresh at the end — a refresh per
+     * worktree would re-run the whole status sweep for every one of them.
+     *
+     * One that git refuses (uncommitted changes without [force], a lock) does not stop the rest:
+     * they were chosen together, but each is its own decision, and the notice names what stayed and
+     * why.
+     */
+    fun removeWorktrees(worktrees: List<Worktree>, force: Boolean) = run("Removing worktrees") {
+        val root = project?.path ?: return@run
+        val doomed = worktrees.filterNot { it.isMain }
+        if (doomed.isEmpty()) return@run
+        val failed = mutableListOf<Pair<Worktree, CommandResult>>()
+        doomed.forEachIndexed { index, worktree ->
+            busy = "Removing worktrees ${index + 1}/${doomed.size}"
+            val result = git.removeWorktree(root, worktree.path, force)
+            if (result.ok) forget(worktree) else failed += worktree to result
+        }
+        val removed = doomed.size - failed.size
+        notice = if (failed.isEmpty()) {
+            Notice("Removed $removed worktree${if (removed == 1) "" else "s"}", isError = false)
+        } else {
+            Notice(
+                buildString {
+                    append("Removed $removed of ${doomed.size}; not removed: ")
+                    append(
+                        failed.joinToString("; ") { (worktree, result) ->
+                            val why = result.message.lines().firstOrNull { it.isNotBlank() }
+                                ?: "git exited with ${result.exitCode}"
+                            "${worktree.name} — $why"
+                        },
+                    )
+                },
+                isError = true,
+            )
+        }
+        // The selection stays put unless it was one of the worktrees that went.
+        val gone = doomed.map { it.path }.toSet() - failed.map { it.first.path }.toSet()
+        reloadProject(selectPath = selectedWorktree?.path?.takeIf { it !in gone })
+    }
+
+    /** Ends everything that was running in a worktree that is gone. */
+    private fun forget(worktree: Worktree) {
         terminals.filter { it.workDir == worktree.path }.forEach { onTerminalDisposed(it.id) }
         terminals = terminals.filterNot { it.workDir == worktree.path }
         if (activeTerminal !in terminals.map { it.id }) activeTerminal = terminals.lastOrNull()?.id
@@ -983,8 +1031,6 @@ class AppState(
         if (focusedAgent !in agents.map { it.id }) focusedAgent = agents.lastOrNull()?.id
         if (zoomedAgent !in agents.map { it.id }) zoomedAgent = null
         if (agentWorktree?.path == worktree.path) agentWorktree = null
-        notice = Notice("Removed ${worktree.name}", isError = false)
-        reloadProject(selectPath = null)
     }
 
     /**
